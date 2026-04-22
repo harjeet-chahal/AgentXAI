@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "agentxai"
+version = "0.1.0"
+description = "A framework for explainable multi-agent AI systems demonstrated on medical triage"
+authors = [{ name = "Harjeet Chahal", email = "harjeetsinghchahal24@gmail.com" }]
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.11"
+keywords = ["xai", "explainability", "multi-agent", "langchain", "medqa"]
+
+[project.urls]
+Repository = "https://github.com/harjeetschahal/AgentXAI"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["agentxai*"]

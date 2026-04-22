@@ -1,0 +1,902 @@
+{
+  "Aspirin": {
+    "condition": "Aspirin",
+    "summary": "[SYNTHETIC STUB] Aspirin is a clinical condition encountered in USMLE-style board questions. This stub was auto-generated from MedQA answer-option frequency data and is NOT a real guideline.",
+    "key_findings": [
+      "History and presentation consistent with Aspirin",
+      "Physical exam findings vary by severity",
+      "Laboratory and imaging findings documented in primary literature"
+    ],
+    "recommended_workup": [
+      "Detailed history and physical examination",
+      "Basic metabolic panel (BMP)",
+      "Complete blood count (CBC)",
+      "ECG if cardiovascular involvement suspected",
+      "Relevant imaging per clinical presentation",
+      "Specialist referral as indicated"
+    ],
+    "source": "synthetic/medqa-derived"
+  },
+  "Colonoscopy": {
+    "condition": "Colonoscopy",
+    "summary": "[SYNTHETIC STUB] Colonoscopy is a clinical condition encountered in USMLE-style board questions. This stub was auto-generated from MedQA answer-option frequency data and is NOT a real guideline.",
+    "key_findings": [
+      "History and presentation consistent with Colonoscopy",
+      "Physical exam findings vary by severity",
+      "Laboratory and imaging findings documented in primary literature"
+    ],
+    "recommended_workup": [
+      "Detailed history and physical examination",
+      "Basic metabolic panel (BMP)",
+      "Complete blood count (CBC)",
+      "ECG if cardiovascular involvement suspected",
+      "Relevant imaging per clinical presentation",
+      "Specialist referral as indicated"
+    ],
+    "source": "synthetic/medqa-derived"
+  },
+  "Reassurance": {
+    "condition": "Reassurance",
+    "summary": "[SYNTHETIC STUB] Reassurance is a clinical condition encountered in USMLE-style board questions. This stub was auto-generated from MedQA answer-option frequency data and is NOT a real guideline.",
+    "key_findings": [
+      "History and presentation consistent with Reassurance",
+      "Physical exam findings vary by severity",
+      "Laboratory and imaging findings documented in primary literature"
+    ],
+    "recommended_workup": [
+      "Detailed history and physical examination",
+      "Basic metabolic panel (BMP)",
+      "Complete blood count (CBC)",
+      "ECG if cardiovascular involvement suspected",
+      "Relevant imaging per clinical presentation",
+      "Specialist referral as indicated"
+    ],
+    "source": "synthetic/medqa-derived"
+  },
+  "Propranolol": {
+    "condition": "Propranolol",
+    "summary": "[SYNTHETIC STUB] Propranolol is a clinical condition encountered in USMLE-style board questions. This stub was auto-generated from MedQA answer-option frequency data and is NOT a real guideline.",
+    "key_findings": [
+      "History and presentation consistent with Propranolol",
+      "Physical exam findings vary by severity",
+      "Laboratory and imaging findings documented in primary literature"
+    ],
+    "recommended_workup": [
+      "Detailed history and physical examination",
+      "Basic metabolic panel (BMP)",
+      "Complete blood count (CBC)",
+      "ECG if cardiovascular involvement suspected",
+      "Relevant imaging per clinical presentation",
+      "Specialist referral as indicated"
+    ],
+    "source": "synthetic/medqa-derived"
+  },
+  "Staphylococcus aureus": {
+    "condition": "Staphylococcus aureus",
+    "summary": "[SYNTHETIC STUB] Staphylococcus aureus is a clinical condition encountered in USMLE-style board questions. This stub was auto-generated from MedQA answer-option frequency data and is NOT a real guideline.",
+    "key_findings": [
+      "History and presentation consistent with Staphylococcus aureus",
+      "Physical exam findings vary by severity",
+      "Laboratory and imaging findings documented in primary literature"
+    ],
+    "recommended_workup": [
+      "Detailed history and physical examination",
+      "Basic metabolic panel (BMP)",
+      "Complete blood count (CBC)",
+      "ECG if cardiovascular involvement suspected",
+      "Relevant imaging per clinical presentation",
+      "Specialist referral as indicated"
+    ],
+    "source": "synthetic/medqa-derived"
+  },
+  "Lithium": {
+    "condition": "Lithium",
+    "summary": "[SYNTHETIC STUB] Lithium is a clinical condition encountered in USMLE-style board questions. This stub was auto-generated from MedQA answer-option frequency data and is NOT a real guideline.",
+    "key_findings": [
+      "History and presentation consistent with Lithium",
+      "Physical exam findings vary by severity",
+      "Laboratory and imaging findings documented in primary literature"
+    ],
+    "recommended_workup": [
+      "Detailed history and physical examination",
+      "Basic metabolic panel (BMP)",
+      "Complete blood count (CBC)",
+      "ECG if cardiovascular involvement suspected",
+      "Relevant imaging per clinical presentation",
+      "Specialist referral as indicated"
+    ],
+    "source": "synthetic/medqa-derived"
+  },
+  "Furosemide": {
+    "condition": "Furosemide",
+    "summary": "[SYNTHETIC STUB] Furosemide is a clinical condition encountered in USMLE-style board questions. This stub was auto-generated from MedQA answer-option frequency data and is NOT a real guideline.",
+    "key_findings": [
+      "History and presentation consistent with Furosemide",
+      "Physical exam findings vary by severity",
+      "Laboratory and imaging findings documented in primary literature"
+    ],
+    "recommended_workup": [
+      "Detailed history and physical examination",
+      "Basic metabolic panel (BMP)",
+      "Complete blood count (CBC)",
+      "ECG if cardiovascular involvement suspected",
+      "Relevant imaging per clinical presentation",
+      "Specialist referral as indicated"
+    ],
+    "source": "synthetic/medqa-derived"
+  },
+  "Major depressive disorder": {
+    "condition": "Major depressive disorder",
+    "summary": "[SYNTHETIC STUB] Major depressive disorder is a clinical condition encountered in USMLE-style board questions. This stub was auto-generated from MedQA answer-option frequency data and is NOT a real guideline.",
+    "key_findings": [
+      "History and presentation consistent with Major depressive disorder",
+      "Physical exam findings vary by severity",
+      "Laboratory and imaging findings documented in primary literature"
+    ],
+    "recommended_workup": [
+      "Detailed history and physical examination",
+      "Basic metabolic panel (BMP)",
+      "Complete blood count (CBC)",
+      "ECG if cardiovascular involvement suspected",
+      "Relevant imaging per clinical presentation",
+      "Specialist referral as indicated"
+    ],
+    "source": "synthetic/medqa-derived"
+  },
+  "Haloperidol": {
+    "condition": "Haloperidol",
+    "summary": "[SYNTHETIC STUB] Haloperidol is a clinical condition encountered in USMLE-style board questions. This stub was auto-generated from MedQA answer-option frequency data and is NOT a real guideline.",
+    "key_findings": [
+      "History and presentation consistent with Haloperidol",
+      "Physical exam findings vary by severity",
+      "Laboratory and imaging findings documented in primary literature"
+    ],
+    "recommended_workup": [
+      "Detailed history and physical examination",
+      "Basic metabolic panel (BMP)",
+      "Complete blood count (CBC)",
+      "ECG if cardiovascular involvement suspected",
+      "Relevant imaging per clinical presentation",
+      "Specialist referral as indicated"
+    ],
+    "source": "synthetic/medqa-derived"
+  },
+  "Methotrexate": {
+    "condition": "Methotrexate",
+    "summary": "[SYNTHETIC STUB] Methotrexate is a clinical condition encountered in USMLE-style board questions. This stub was auto-generated from MedQA answer-option frequency data and is NOT a real guideline.",
+    "key_findings": [
+      "History and presentation consistent with Methotrexate",
+      "Physical exam findings vary by severity",
+      "Laboratory and imaging findings documented in primary literature"
+    ],
+    "recommended_workup": [
+      "Detailed history and physical examination",
+      "Basic metabolic panel (BMP)",
+      "Complete blood count (CBC)",
+      "ECG if cardiovascular involvement suspected",
+      "Relevant imaging per clinical presentation",
+      "Specialist referral as indicated"
+    ],
+    "source": "synthetic/medqa-derived"
+  },
+  "Prednisone": {
+    "condition": "Prednisone",
+    "summary": "[SYNTHETIC STUB] Prednisone is a clinical condition encountered in USMLE-style board questions. This stub was auto-generated from MedQA answer-option frequency data and is NOT a real guideline.",
+    "key_findings": [
+      "History and presentation consistent with Prednisone",
+      "Physical exam findings vary by severity",
+      "Laboratory and imaging findings documented in primary literature"
+    ],
+    "recommended_workup": [
+      "Detailed history and physical examination",
+      "Basic metabolic panel (BMP)",
+      "Complete blood count (CBC)",
+      "ECG if cardiovascular involvement suspected",
+      "Relevant imaging per clinical presentation",
+      "Specialist referral as indicated"
+    ],
+    "source": "synthetic/medqa-derived"
+  },
+  "Metoprolol": {
+    "condition": "Metoprolol",
+    "summary": "[SYNTHETIC STUB] Metoprolol is a clinical condition encountered in USMLE-style board questions. This stub was auto-generated from MedQA answer-option frequency data and is NOT a real guideline.",
+    "key_findings": [
+      "History and presentation consistent with Metoprolol",
+      "Physical exam findings vary by severity",
+      "Laboratory and imaging findings documented in primary literature"
+    ],
+    "recommended_workup": [
+      "Detailed history and physical examination",
+      "Basic metabolic panel (BMP)",
+      "Complete blood count (CBC)",
+      "ECG if cardiovascular involvement suspected",
+      "Relevant imaging per clinical presentation",
+      "Specialist referral as indicated"
+    ],
+    "source": "synthetic/medqa-derived"
+  },
+  "Echocardiography": {
+    "condition": "Echocardiography",
+    "summary": "[SYNTHETIC STUB] Echocardiography is a clinical condition encountered in USMLE-style board questions. This stub was auto-generated from MedQA answer-option frequency data and is NOT a real guideline.",
+    "key_findings": [
+      "History and presentation consistent with Echocardiography",
+      "Physical exam findings vary by severity",
+      "Laboratory and imaging findings documented in primary literature"
+    ],
+    "recommended_workup": [
+      "Detailed history and physical examination",
+      "Basic metabolic panel (BMP)",
+      "Complete blood count (CBC)",
+      "ECG if cardiovascular involvement suspected",
+      "Relevant imaging per clinical presentation",
+      "Specialist referral as indicated"
+    ],
+    "source": "synthetic/medqa-derived"
+  },
+  "Pulmonary embolism": {
+    "condition": "Pulmonary embolism",
+    "summary": "[SYNTHETIC STUB] Pulmonary embolism is a clinical condition encountered in USMLE-style board questions. This stub was auto-generated from MedQA answer-option frequency data and is NOT a real guideline.",
+    "key_findings": [
+      "History and presentation consistent with Pulmonary embolism",
+      "Physical exam findings vary by severity",
+      "Laboratory and imaging findings documented in primary literature"
+    ],
+    "recommended_workup": [
+      "Detailed history and physical examination",
+      "Basic metabolic panel (BMP)",
+      "Complete blood count (CBC)",
+      "ECG if cardiovascular involvement suspected",
+      "Relevant imaging per clinical presentation",
+      "Specialist referral as indicated"
+    ],
+    "source": "synthetic/medqa-derived"
+  },
+  "Schizophrenia": {
+    "condition": "Schizophrenia",
+    "summary": "[SYNTHETIC STUB] Schizophrenia is a clinical condition encountered in USMLE-style board questions. This stub was auto-generated from MedQA answer-option frequency data and is NOT a real guideline.",
+    "key_findings": [
+      "History and presentation consistent with Schizophrenia",
+      "Physical exam findings vary by severity",
+      "Laboratory and imaging findings documented in primary literature"
+    ],
+    "recommended_workup": [
+      "Detailed history and physical examination",
+      "Basic metabolic panel (BMP)",
+      "Complete blood count (CBC)",
+      "ECG if cardiovascular involvement suspected",
+      "Relevant imaging per clinical presentation",
+      "Specialist referral as indicated"
+    ],
+    "source": "synthetic/medqa-derived"
+  },
+  "Lumbar puncture": {
+    "condition": "Lumbar puncture",
+    "summary": "[SYNTHETIC STUB] Lumbar puncture is a clinical condition encountered in USMLE-style board questions. This stub was auto-generated from MedQA answer-option frequency data and is NOT a real guideline.",
+    "key_findings": [
+      "History and presentation consistent with Lumbar puncture",
+      "Physical exam findings vary by severity",
+      "Laboratory and imaging findings documented in primary literature"
+    ],
+    "recommended_workup": [
+      "Detailed history and physical examination",
+      "Basic metabolic panel (BMP)",
+      "Complete blood count (CBC)",
+      "ECG if cardiovascular involvement suspected",
+      "Relevant imaging per clinical presentation",
+      "Specialist referral as indicated"
+    ],
+    "source": "synthetic/medqa-derived"
+  },
+  "Fluoxetine": {
+    "condition": "Fluoxetine",
+    "summary": "[SYNTHETIC STUB] Fluoxetine is a clinical condition encountered in USMLE-style board questions. This stub was auto-generated from MedQA answer-option frequency data and is NOT a real guideline.",
+    "key_findings": [
+      "History and presentation consistent with Fluoxetine",
+      "Physical exam findings vary by severity",
+      "Laboratory and imaging findings documented in primary literature"
+    ],
+    "recommended_workup": [
+      "Detailed history and physical examination",
+      "Basic metabolic panel (BMP)",
+      "Complete blood count (CBC)",
+      "ECG if cardiovascular involvement suspected",
+      "Relevant imaging per clinical presentation",
+      "Specialist referral as indicated"
+    ],
+    "source": "synthetic/medqa-derived"
+  },
+  "Valproic acid": {
+    "condition": "Valproic acid",
+    "summary": "[SYNTHETIC STUB] Valproic acid is a clinical condition encountered in USMLE-style board questions. This stub was auto-generated from MedQA answer-option frequency data and is NOT a real guideline.",
+    "key_findings": [
+      "History and presentation consistent with Valproic acid",
+      "Physical exam findings vary by severity",
+      "Laboratory and imaging findings documented in primary literature"
+    ],
+    "recommended_workup": [
+      "Detailed history and physical examination",
+      "Basic metabolic panel (BMP)",
+      "Complete blood count (CBC)",
+      "ECG if cardiovascular involvement suspected",
+      "Relevant imaging per clinical presentation",
+      "Specialist referral as indicated"
+    ],
+    "source": "synthetic/medqa-derived"
+  },
+  "Doxycycline": {
+    "condition": "Doxycycline",
+    "summary": "[SYNTHETIC STUB] Doxycycline is a clinical condition encountered in USMLE-style board questions. This stub was auto-generated from MedQA answer-option frequency data and is NOT a real guideline.",
+    "key_findings": [
+      "History and presentation consistent with Doxycycline",
+      "Physical exam findings vary by severity",
+      "Laboratory and imaging findings documented in primary literature"
+    ],
+    "recommended_workup": [
+      "Detailed history and physical examination",
+      "Basic metabolic panel (BMP)",
+      "Complete blood count (CBC)",
+      "ECG if cardiovascular involvement suspected",
+      "Relevant imaging per clinical presentation",
+      "Specialist referral as indicated"
+    ],
+    "source": "synthetic/medqa-derived"
+  },
+  "Hydrochlorothiazide": {
+    "condition": "Hydrochlorothiazide",
+    "summary": "[SYNTHETIC STUB] Hydrochlorothiazide is a clinical condition encountered in USMLE-style board questions. This stub was auto-generated from MedQA answer-option frequency data and is NOT a real guideline.",
+    "key_findings": [
+      "History and presentation consistent with Hydrochlorothiazide",
+      "Physical exam findings vary by severity",
+      "Laboratory and imaging findings documented in primary literature"
+    ],
+    "recommended_workup": [
+      "Detailed history and physical examination",
+      "Basic metabolic panel (BMP)",
+      "Complete blood count (CBC)",
+      "ECG if cardiovascular involvement suspected",
+      "Relevant imaging per clinical presentation",
+      "Specialist referral as indicated"
+    ],
+    "source": "synthetic/medqa-derived"
+  },
+  "Lisinopril": {
+    "condition": "Lisinopril",
+    "summary": "[SYNTHETIC STUB] Lisinopril is a clinical condition encountered in USMLE-style board questions. This stub was auto-generated from MedQA answer-option frequency data and is NOT a real guideline.",
+    "key_findings": [
+      "History and presentation consistent with Lisinopril",
+      "Physical exam findings vary by severity",
+      "Laboratory and imaging findings documented in primary literature"
+    ],
+    "recommended_workup": [
+      "Detailed history and physical examination",
+      "Basic metabolic panel (BMP)",
+      "Complete blood count (CBC)",
+      "ECG if cardiovascular involvement suspected",
+      "Relevant imaging per clinical presentation",
+      "Specialist referral as indicated"
+    ],
+    "source": "synthetic/medqa-derived"
+  },
+  "Hyperkalemia": {
+    "condition": "Hyperkalemia",
+    "summary": "[SYNTHETIC STUB] Hyperkalemia is a clinical condition encountered in USMLE-style board questions. This stub was auto-generated from MedQA answer-option frequency data and is NOT a real guideline.",
+    "key_findings": [
+      "History and presentation consistent with Hyperkalemia",
+      "Physical exam findings vary by severity",
+      "Laboratory and imaging findings documented in primary literature"
+    ],
+    "recommended_workup": [
+      "Detailed history and physical examination",
+      "Basic metabolic panel (BMP)",
+      "Complete blood count (CBC)",
+      "ECG if cardiovascular involvement suspected",
+      "Relevant imaging per clinical presentation",
+      "Specialist referral as indicated"
+    ],
+    "source": "synthetic/medqa-derived"
+  },
+  "Metformin": {
+    "condition": "Metformin",
+    "summary": "[SYNTHETIC STUB] Metformin is a clinical condition encountered in USMLE-style board questions. This stub was auto-generated from MedQA answer-option frequency data and is NOT a real guideline.",
+    "key_findings": [
+      "History and presentation consistent with Metformin",
+      "Physical exam findings vary by severity",
+      "Laboratory and imaging findings documented in primary literature"
+    ],
+    "recommended_workup": [
+      "Detailed history and physical examination",
+      "Basic metabolic panel (BMP)",
+      "Complete blood count (CBC)",
+      "ECG if cardiovascular involvement suspected",
+      "Relevant imaging per clinical presentation",
+      "Specialist referral as indicated"
+    ],
+    "source": "synthetic/medqa-derived"
+  },
+  "Metronidazole": {
+    "condition": "Metronidazole",
+    "summary": "[SYNTHETIC STUB] Metronidazole is a clinical condition encountered in USMLE-style board questions. This stub was auto-generated from MedQA answer-option frequency data and is NOT a real guideline.",
+    "key_findings": [
+      "History and presentation consistent with Metronidazole",
+      "Physical exam findings vary by severity",
+      "Laboratory and imaging findings documented in primary literature"
+    ],
+    "recommended_workup": [
+      "Detailed history and physical examination",
+      "Basic metabolic panel (BMP)",
+      "Complete blood count (CBC)",
+      "ECG if cardiovascular involvement suspected",
+      "Relevant imaging per clinical presentation",
+      "Specialist referral as indicated"
+    ],
+    "source": "synthetic/medqa-derived"
+  },
+  "Ceftriaxone": {
+    "condition": "Ceftriaxone",
+    "summary": "[SYNTHETIC STUB] Ceftriaxone is a clinical condition encountered in USMLE-style board questions. This stub was auto-generated from MedQA answer-option frequency data and is NOT a real guideline.",
+    "key_findings": [
+      "History and presentation consistent with Ceftriaxone",
+      "Physical exam findings vary by severity",
+      "Laboratory and imaging findings documented in primary literature"
+    ],
+    "recommended_workup": [
+      "Detailed history and physical examination",
+      "Basic metabolic panel (BMP)",
+      "Complete blood count (CBC)",
+      "ECG if cardiovascular involvement suspected",
+      "Relevant imaging per clinical presentation",
+      "Specialist referral as indicated"
+    ],
+    "source": "synthetic/medqa-derived"
+  },
+  "Hypoglycemia": {
+    "condition": "Hypoglycemia",
+    "summary": "[SYNTHETIC STUB] Hypoglycemia is a clinical condition encountered in USMLE-style board questions. This stub was auto-generated from MedQA answer-option frequency data and is NOT a real guideline.",
+    "key_findings": [
+      "History and presentation consistent with Hypoglycemia",
+      "Physical exam findings vary by severity",
+      "Laboratory and imaging findings documented in primary literature"
+    ],
+    "recommended_workup": [
+      "Detailed history and physical examination",
+      "Basic metabolic panel (BMP)",
+      "Complete blood count (CBC)",
+      "ECG if cardiovascular involvement suspected",
+      "Relevant imaging per clinical presentation",
+      "Specialist referral as indicated"
+    ],
+    "source": "synthetic/medqa-derived"
+  },
+  "Streptococcus pneumoniae": {
+    "condition": "Streptococcus pneumoniae",
+    "summary": "[SYNTHETIC STUB] Streptococcus pneumoniae is a clinical condition encountered in USMLE-style board questions. This stub was auto-generated from MedQA answer-option frequency data and is NOT a real guideline.",
+    "key_findings": [
+      "History and presentation consistent with Streptococcus pneumoniae",
+      "Physical exam findings vary by severity",
+      "Laboratory and imaging findings documented in primary literature"
+    ],
+    "recommended_workup": [
+      "Detailed history and physical examination",
+      "Basic metabolic panel (BMP)",
+      "Complete blood count (CBC)",
+      "ECG if cardiovascular involvement suspected",
+      "Relevant imaging per clinical presentation",
+      "Specialist referral as indicated"
+    ],
+    "source": "synthetic/medqa-derived"
+  },
+  "Pseudomonas aeruginosa": {
+    "condition": "Pseudomonas aeruginosa",
+    "summary": "[SYNTHETIC STUB] Pseudomonas aeruginosa is a clinical condition encountered in USMLE-style board questions. This stub was auto-generated from MedQA answer-option frequency data and is NOT a real guideline.",
+    "key_findings": [
+      "History and presentation consistent with Pseudomonas aeruginosa",
+      "Physical exam findings vary by severity",
+      "Laboratory and imaging findings documented in primary literature"
+    ],
+    "recommended_workup": [
+      "Detailed history and physical examination",
+      "Basic metabolic panel (BMP)",
+      "Complete blood count (CBC)",
+      "ECG if cardiovascular involvement suspected",
+      "Relevant imaging per clinical presentation",
+      "Specialist referral as indicated"
+    ],
+    "source": "synthetic/medqa-derived"
+  },
+  "Warfarin": {
+    "condition": "Warfarin",
+    "summary": "[SYNTHETIC STUB] Warfarin is a clinical condition encountered in USMLE-style board questions. This stub was auto-generated from MedQA answer-option frequency data and is NOT a real guideline.",
+    "key_findings": [
+      "History and presentation consistent with Warfarin",
+      "Physical exam findings vary by severity",
+      "Laboratory and imaging findings documented in primary literature"
+    ],
+    "recommended_workup": [
+      "Detailed history and physical examination",
+      "Basic metabolic panel (BMP)",
+      "Complete blood count (CBC)",
+      "ECG if cardiovascular involvement suspected",
+      "Relevant imaging per clinical presentation",
+      "Specialist referral as indicated"
+    ],
+    "source": "synthetic/medqa-derived"
+  },
+  "Amitriptyline": {
+    "condition": "Amitriptyline",
+    "summary": "[SYNTHETIC STUB] Amitriptyline is a clinical condition encountered in USMLE-style board questions. This stub was auto-generated from MedQA answer-option frequency data and is NOT a real guideline.",
+    "key_findings": [
+      "History and presentation consistent with Amitriptyline",
+      "Physical exam findings vary by severity",
+      "Laboratory and imaging findings documented in primary literature"
+    ],
+    "recommended_workup": [
+      "Detailed history and physical examination",
+      "Basic metabolic panel (BMP)",
+      "Complete blood count (CBC)",
+      "ECG if cardiovascular involvement suspected",
+      "Relevant imaging per clinical presentation",
+      "Specialist referral as indicated"
+    ],
+    "source": "synthetic/medqa-derived"
+  },
+  "Acyclovir": {
+    "condition": "Acyclovir",
+    "summary": "[SYNTHETIC STUB] Acyclovir is a clinical condition encountered in USMLE-style board questions. This stub was auto-generated from MedQA answer-option frequency data and is NOT a real guideline.",
+    "key_findings": [
+      "History and presentation consistent with Acyclovir",
+      "Physical exam findings vary by severity",
+      "Laboratory and imaging findings documented in primary literature"
+    ],
+    "recommended_workup": [
+      "Detailed history and physical examination",
+      "Basic metabolic panel (BMP)",
+      "Complete blood count (CBC)",
+      "ECG if cardiovascular involvement suspected",
+      "Relevant imaging per clinical presentation",
+      "Specialist referral as indicated"
+    ],
+    "source": "synthetic/medqa-derived"
+  },
+  "Ciprofloxacin": {
+    "condition": "Ciprofloxacin",
+    "summary": "[SYNTHETIC STUB] Ciprofloxacin is a clinical condition encountered in USMLE-style board questions. This stub was auto-generated from MedQA answer-option frequency data and is NOT a real guideline.",
+    "key_findings": [
+      "History and presentation consistent with Ciprofloxacin",
+      "Physical exam findings vary by severity",
+      "Laboratory and imaging findings documented in primary literature"
+    ],
+    "recommended_workup": [
+      "Detailed history and physical examination",
+      "Basic metabolic panel (BMP)",
+      "Complete blood count (CBC)",
+      "ECG if cardiovascular involvement suspected",
+      "Relevant imaging per clinical presentation",
+      "Specialist referral as indicated"
+    ],
+    "source": "synthetic/medqa-derived"
+  },
+  "Abdominal ultrasound": {
+    "condition": "Abdominal ultrasound",
+    "summary": "[SYNTHETIC STUB] Abdominal ultrasound is a clinical condition encountered in USMLE-style board questions. This stub was auto-generated from MedQA answer-option frequency data and is NOT a real guideline.",
+    "key_findings": [
+      "History and presentation consistent with Abdominal ultrasound",
+      "Physical exam findings vary by severity",
+      "Laboratory and imaging findings documented in primary literature"
+    ],
+    "recommended_workup": [
+      "Detailed history and physical examination",
+      "Basic metabolic panel (BMP)",
+      "Complete blood count (CBC)",
+      "ECG if cardiovascular involvement suspected",
+      "Relevant imaging per clinical presentation",
+      "Specialist referral as indicated"
+    ],
+    "source": "synthetic/medqa-derived"
+  },
+  "Observation": {
+    "condition": "Observation",
+    "summary": "[SYNTHETIC STUB] Observation is a clinical condition encountered in USMLE-style board questions. This stub was auto-generated from MedQA answer-option frequency data and is NOT a real guideline.",
+    "key_findings": [
+      "History and presentation consistent with Observation",
+      "Physical exam findings vary by severity",
+      "Laboratory and imaging findings documented in primary literature"
+    ],
+    "recommended_workup": [
+      "Detailed history and physical examination",
+      "Basic metabolic panel (BMP)",
+      "Complete blood count (CBC)",
+      "ECG if cardiovascular involvement suspected",
+      "Relevant imaging per clinical presentation",
+      "Specialist referral as indicated"
+    ],
+    "source": "synthetic/medqa-derived"
+  },
+  "Hepatocellular carcinoma": {
+    "condition": "Hepatocellular carcinoma",
+    "summary": "[SYNTHETIC STUB] Hepatocellular carcinoma is a clinical condition encountered in USMLE-style board questions. This stub was auto-generated from MedQA answer-option frequency data and is NOT a real guideline.",
+    "key_findings": [
+      "History and presentation consistent with Hepatocellular carcinoma",
+      "Physical exam findings vary by severity",
+      "Laboratory and imaging findings documented in primary literature"
+    ],
+    "recommended_workup": [
+      "Detailed history and physical examination",
+      "Basic metabolic panel (BMP)",
+      "Complete blood count (CBC)",
+      "ECG if cardiovascular involvement suspected",
+      "Relevant imaging per clinical presentation",
+      "Specialist referral as indicated"
+    ],
+    "source": "synthetic/medqa-derived"
+  },
+  "Hypertension": {
+    "condition": "Hypertension",
+    "summary": "[SYNTHETIC STUB] Hypertension is a clinical condition encountered in USMLE-style board questions. This stub was auto-generated from MedQA answer-option frequency data and is NOT a real guideline.",
+    "key_findings": [
+      "History and presentation consistent with Hypertension",
+      "Physical exam findings vary by severity",
+      "Laboratory and imaging findings documented in primary literature"
+    ],
+    "recommended_workup": [
+      "Detailed history and physical examination",
+      "Basic metabolic panel (BMP)",
+      "Complete blood count (CBC)",
+      "ECG if cardiovascular involvement suspected",
+      "Relevant imaging per clinical presentation",
+      "Specialist referral as indicated"
+    ],
+    "source": "synthetic/medqa-derived"
+  },
+  "Lorazepam": {
+    "condition": "Lorazepam",
+    "summary": "[SYNTHETIC STUB] Lorazepam is a clinical condition encountered in USMLE-style board questions. This stub was auto-generated from MedQA answer-option frequency data and is NOT a real guideline.",
+    "key_findings": [
+      "History and presentation consistent with Lorazepam",
+      "Physical exam findings vary by severity",
+      "Laboratory and imaging findings documented in primary literature"
+    ],
+    "recommended_workup": [
+      "Detailed history and physical examination",
+      "Basic metabolic panel (BMP)",
+      "Complete blood count (CBC)",
+      "ECG if cardiovascular involvement suspected",
+      "Relevant imaging per clinical presentation",
+      "Specialist referral as indicated"
+    ],
+    "source": "synthetic/medqa-derived"
+  },
+  "Epinephrine": {
+    "condition": "Epinephrine",
+    "summary": "[SYNTHETIC STUB] Epinephrine is a clinical condition encountered in USMLE-style board questions. This stub was auto-generated from MedQA answer-option frequency data and is NOT a real guideline.",
+    "key_findings": [
+      "History and presentation consistent with Epinephrine",
+      "Physical exam findings vary by severity",
+      "Laboratory and imaging findings documented in primary literature"
+    ],
+    "recommended_workup": [
+      "Detailed history and physical examination",
+      "Basic metabolic panel (BMP)",
+      "Complete blood count (CBC)",
+      "ECG if cardiovascular involvement suspected",
+      "Relevant imaging per clinical presentation",
+      "Specialist referral as indicated"
+    ],
+    "source": "synthetic/medqa-derived"
+  },
+  "Rheumatoid arthritis": {
+    "condition": "Rheumatoid arthritis",
+    "summary": "[SYNTHETIC STUB] Rheumatoid arthritis is a clinical condition encountered in USMLE-style board questions. This stub was auto-generated from MedQA answer-option frequency data and is NOT a real guideline.",
+    "key_findings": [
+      "History and presentation consistent with Rheumatoid arthritis",
+      "Physical exam findings vary by severity",
+      "Laboratory and imaging findings documented in primary literature"
+    ],
+    "recommended_workup": [
+      "Detailed history and physical examination",
+      "Basic metabolic panel (BMP)",
+      "Complete blood count (CBC)",
+      "ECG if cardiovascular involvement suspected",
+      "Relevant imaging per clinical presentation",
+      "Specialist referral as indicated"
+    ],
+    "source": "synthetic/medqa-derived"
+  },
+  "Vancomycin": {
+    "condition": "Vancomycin",
+    "summary": "[SYNTHETIC STUB] Vancomycin is a clinical condition encountered in USMLE-style board questions. This stub was auto-generated from MedQA answer-option frequency data and is NOT a real guideline.",
+    "key_findings": [
+      "History and presentation consistent with Vancomycin",
+      "Physical exam findings vary by severity",
+      "Laboratory and imaging findings documented in primary literature"
+    ],
+    "recommended_workup": [
+      "Detailed history and physical examination",
+      "Basic metabolic panel (BMP)",
+      "Complete blood count (CBC)",
+      "ECG if cardiovascular involvement suspected",
+      "Relevant imaging per clinical presentation",
+      "Specialist referral as indicated"
+    ],
+    "source": "synthetic/medqa-derived"
+  },
+  "Verapamil": {
+    "condition": "Verapamil",
+    "summary": "[SYNTHETIC STUB] Verapamil is a clinical condition encountered in USMLE-style board questions. This stub was auto-generated from MedQA answer-option frequency data and is NOT a real guideline.",
+    "key_findings": [
+      "History and presentation consistent with Verapamil",
+      "Physical exam findings vary by severity",
+      "Laboratory and imaging findings documented in primary literature"
+    ],
+    "recommended_workup": [
+      "Detailed history and physical examination",
+      "Basic metabolic panel (BMP)",
+      "Complete blood count (CBC)",
+      "ECG if cardiovascular involvement suspected",
+      "Relevant imaging per clinical presentation",
+      "Specialist referral as indicated"
+    ],
+    "source": "synthetic/medqa-derived"
+  },
+  "Multiple myeloma": {
+    "condition": "Multiple myeloma",
+    "summary": "[SYNTHETIC STUB] Multiple myeloma is a clinical condition encountered in USMLE-style board questions. This stub was auto-generated from MedQA answer-option frequency data and is NOT a real guideline.",
+    "key_findings": [
+      "History and presentation consistent with Multiple myeloma",
+      "Physical exam findings vary by severity",
+      "Laboratory and imaging findings documented in primary literature"
+    ],
+    "recommended_workup": [
+      "Detailed history and physical examination",
+      "Basic metabolic panel (BMP)",
+      "Complete blood count (CBC)",
+      "ECG if cardiovascular involvement suspected",
+      "Relevant imaging per clinical presentation",
+      "Specialist referral as indicated"
+    ],
+    "source": "synthetic/medqa-derived"
+  },
+  "Diazepam": {
+    "condition": "Diazepam",
+    "summary": "[SYNTHETIC STUB] Diazepam is a clinical condition encountered in USMLE-style board questions. This stub was auto-generated from MedQA answer-option frequency data and is NOT a real guideline.",
+    "key_findings": [
+      "History and presentation consistent with Diazepam",
+      "Physical exam findings vary by severity",
+      "Laboratory and imaging findings documented in primary literature"
+    ],
+    "recommended_workup": [
+      "Detailed history and physical examination",
+      "Basic metabolic panel (BMP)",
+      "Complete blood count (CBC)",
+      "ECG if cardiovascular involvement suspected",
+      "Relevant imaging per clinical presentation",
+      "Specialist referral as indicated"
+    ],
+    "source": "synthetic/medqa-derived"
+  },
+  "Schizoid personality disorder": {
+    "condition": "Schizoid personality disorder",
+    "summary": "[SYNTHETIC STUB] Schizoid personality disorder is a clinical condition encountered in USMLE-style board questions. This stub was auto-generated from MedQA answer-option frequency data and is NOT a real guideline.",
+    "key_findings": [
+      "History and presentation consistent with Schizoid personality disorder",
+      "Physical exam findings vary by severity",
+      "Laboratory and imaging findings documented in primary literature"
+    ],
+    "recommended_workup": [
+      "Detailed history and physical examination",
+      "Basic metabolic panel (BMP)",
+      "Complete blood count (CBC)",
+      "ECG if cardiovascular involvement suspected",
+      "Relevant imaging per clinical presentation",
+      "Specialist referral as indicated"
+    ],
+    "source": "synthetic/medqa-derived"
+  },
+  "CT scan of the abdomen": {
+    "condition": "CT scan of the abdomen",
+    "summary": "[SYNTHETIC STUB] CT scan of the abdomen is a clinical condition encountered in USMLE-style board questions. This stub was auto-generated from MedQA answer-option frequency data and is NOT a real guideline.",
+    "key_findings": [
+      "History and presentation consistent with CT scan of the abdomen",
+      "Physical exam findings vary by severity",
+      "Laboratory and imaging findings documented in primary literature"
+    ],
+    "recommended_workup": [
+      "Detailed history and physical examination",
+      "Basic metabolic panel (BMP)",
+      "Complete blood count (CBC)",
+      "ECG if cardiovascular involvement suspected",
+      "Relevant imaging per clinical presentation",
+      "Specialist referral as indicated"
+    ],
+    "source": "synthetic/medqa-derived"
+  },
+  "Amiodarone": {
+    "condition": "Amiodarone",
+    "summary": "[SYNTHETIC STUB] Amiodarone is a clinical condition encountered in USMLE-style board questions. This stub was auto-generated from MedQA answer-option frequency data and is NOT a real guideline.",
+    "key_findings": [
+      "History and presentation consistent with Amiodarone",
+      "Physical exam findings vary by severity",
+      "Laboratory and imaging findings documented in primary literature"
+    ],
+    "recommended_workup": [
+      "Detailed history and physical examination",
+      "Basic metabolic panel (BMP)",
+      "Complete blood count (CBC)",
+      "ECG if cardiovascular involvement suspected",
+      "Relevant imaging per clinical presentation",
+      "Specialist referral as indicated"
+    ],
+    "source": "synthetic/medqa-derived"
+  },
+  "Sodium bicarbonate": {
+    "condition": "Sodium bicarbonate",
+    "summary": "[SYNTHETIC STUB] Sodium bicarbonate is a clinical condition encountered in USMLE-style board questions. This stub was auto-generated from MedQA answer-option frequency data and is NOT a real guideline.",
+    "key_findings": [
+      "History and presentation consistent with Sodium bicarbonate",
+      "Physical exam findings vary by severity",
+      "Laboratory and imaging findings documented in primary literature"
+    ],
+    "recommended_workup": [
+      "Detailed history and physical examination",
+      "Basic metabolic panel (BMP)",
+      "Complete blood count (CBC)",
+      "ECG if cardiovascular involvement suspected",
+      "Relevant imaging per clinical presentation",
+      "Specialist referral as indicated"
+    ],
+    "source": "synthetic/medqa-derived"
+  },
+  "Amlodipine": {
+    "condition": "Amlodipine",
+    "summary": "[SYNTHETIC STUB] Amlodipine is a clinical condition encountered in USMLE-style board questions. This stub was auto-generated from MedQA answer-option frequency data and is NOT a real guideline.",
+    "key_findings": [
+      "History and presentation consistent with Amlodipine",
+      "Physical exam findings vary by severity",
+      "Laboratory and imaging findings documented in primary literature"
+    ],
+    "recommended_workup": [
+      "Detailed history and physical examination",
+      "Basic metabolic panel (BMP)",
+      "Complete blood count (CBC)",
+      "ECG if cardiovascular involvement suspected",
+      "Relevant imaging per clinical presentation",
+      "Specialist referral as indicated"
+    ],
+    "source": "synthetic/medqa-derived"
+  },
+  "Digoxin": {
+    "condition": "Digoxin",
+    "summary": "[SYNTHETIC STUB] Digoxin is a clinical condition encountered in USMLE-style board questions. This stub was auto-generated from MedQA answer-option frequency data and is NOT a real guideline.",
+    "key_findings": [
+      "History and presentation consistent with Digoxin",
+      "Physical exam findings vary by severity",
+      "Laboratory and imaging findings documented in primary literature"
+    ],
+    "recommended_workup": [
+      "Detailed history and physical examination",
+      "Basic metabolic panel (BMP)",
+      "Complete blood count (CBC)",
+      "ECG if cardiovascular involvement suspected",
+      "Relevant imaging per clinical presentation",
+      "Specialist referral as indicated"
+    ],
+    "source": "synthetic/medqa-derived"
+  },
+  "Naloxone": {
+    "condition": "Naloxone",
+    "summary": "[SYNTHETIC STUB] Naloxone is a clinical condition encountered in USMLE-style board questions. This stub was auto-generated from MedQA answer-option frequency data and is NOT a real guideline.",
+    "key_findings": [
+      "History and presentation consistent with Naloxone",
+      "Physical exam findings vary by severity",
+      "Laboratory and imaging findings documented in primary literature"
+    ],
+    "recommended_workup": [
+      "Detailed history and physical examination",
+      "Basic metabolic panel (BMP)",
+      "Complete blood count (CBC)",
+      "ECG if cardiovascular involvement suspected",
+      "Relevant imaging per clinical presentation",
+      "Specialist referral as indicated"
+    ],
+    "source": "synthetic/medqa-derived"
+  }
+}
