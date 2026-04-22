@@ -34,10 +34,10 @@ from agentxai.xai.trajectory_logger import TrajectoryLogger
 
 
 # ---------------------------------------------------------------------------
-# Default LLM factory (Claude via langchain-anthropic)
+# Default LLM factory (Gemini via langchain-google-genai)
 # ---------------------------------------------------------------------------
 
-DEFAULT_LLM_MODEL = "claude-sonnet-4-5"
+DEFAULT_LLM_MODEL = "gemini-2.5-flash-lite"
 DEFAULT_LLM_TEMPERATURE = 0.0
 
 
@@ -46,17 +46,37 @@ def make_default_llm(
     temperature: float = DEFAULT_LLM_TEMPERATURE,
 ) -> Any:
     """
-    Best-effort: instantiate ``ChatAnthropic(model, temperature=0)`` and return
-    it. Returns ``None`` if langchain-anthropic is not installed or the client
-    cannot be constructed (e.g. missing ``ANTHROPIC_API_KEY``). Callers that
-    must have a working LLM should check for ``None`` and raise.
+    Best-effort: instantiate ``ChatGoogleGenerativeAI(model, temperature=0)``
+    and return it. Returns ``None`` if langchain-google-genai is not installed
+    or the client cannot be constructed (e.g. missing ``GOOGLE_API_KEY``).
+    Callers that must have a working LLM should check for ``None`` and raise.
+
+    Safety filters are set to BLOCK_NONE across all categories. MedQA cases
+    routinely contain drug names, overdose scenarios, suicidal ideation and
+    other content Gemini's defaults (BLOCK_MEDIUM_AND_ABOVE) flag, which
+    silently returns empty content and breaks the JSON-contract prompts.
     """
     try:
-        from langchain_anthropic import ChatAnthropic
+        from langchain_google_genai import (
+            ChatGoogleGenerativeAI,
+            HarmBlockThreshold,
+            HarmCategory,
+        )
     except ImportError:
         return None
+
+    safety_settings = {
+        HarmCategory.HARM_CATEGORY_HARASSMENT:        HarmBlockThreshold.BLOCK_NONE,
+        HarmCategory.HARM_CATEGORY_HATE_SPEECH:       HarmBlockThreshold.BLOCK_NONE,
+        HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
+        HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
+    }
     try:
-        return ChatAnthropic(model=model, temperature=temperature)
+        return ChatGoogleGenerativeAI(
+            model=model,
+            temperature=temperature,
+            safety_settings=safety_settings,
+        )
     except Exception:
         return None
 

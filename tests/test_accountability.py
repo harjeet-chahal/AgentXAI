@@ -319,7 +319,7 @@ class TestGenerate:
     def test_no_llm_falls_back_to_templated_sentence(self, store, scenario):
         pipeline = MockPipeline({"final_diagnosis": "PE", "confidence": 0.5})
         gen = AccountabilityReportGenerator(store=store, pipeline=pipeline, llm=None)
-        # Force the optional ChatAnthropic path off regardless of env.
+        # Force the optional ChatGoogleGenerativeAI path off regardless of env.
         gen.llm = None
         report = gen.generate(TASK_ID)
         assert report.one_line_explanation

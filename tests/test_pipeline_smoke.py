@@ -62,8 +62,8 @@ def _row_count(store: TrajectoryStore, table: str) -> int:
 @pytest.mark.slow
 def test_pipeline_end_to_end_on_one_medqa_record(tmp_path):
     """Real LLM, real cached tool indices, stubbed PubMed (FAISS)."""
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        pytest.skip("ANTHROPIC_API_KEY not set; skipping live LLM smoke test.")
+    if not os.environ.get("GOOGLE_API_KEY"):
+        pytest.skip("GOOGLE_API_KEY not set; skipping live LLM smoke test.")
 
     db_path = tmp_path / "smoke.db"
     db_url = f"sqlite:///{db_path}"

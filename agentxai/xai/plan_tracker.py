@@ -3,8 +3,8 @@ Pillar 2 — Plans.
 
 PlanTracker captures each agent's intended actions at the start of its run,
 records what it actually does, and — on finalize — computes the symmetric
-set difference (order-preserving) between the two lists and asks Claude
-(claude-sonnet-4-5 via langchain-anthropic) to produce one sentence of
+set difference (order-preserving) between the two lists and asks Gemini
+(gemini-2.5-flash via langchain-google-genai) to produce one sentence of
 reasoning per deviation, grounded in the agent's recent trajectory.
 
 All plans are persisted through TrajectoryStore.save_plan. An in-memory
@@ -22,12 +22,12 @@ from agentxai.data.schemas import AgentPlan, TrajectoryEvent
 from agentxai.store.trajectory_store import TrajectoryStore
 
 try:  # Optional runtime dep — tests inject a fake LLM instead.
-    from langchain_anthropic import ChatAnthropic
+    from langchain_google_genai import ChatGoogleGenerativeAI
 except ImportError:  # pragma: no cover - optional
-    ChatAnthropic = None  # type: ignore[assignment]
+    ChatGoogleGenerativeAI = None  # type: ignore[assignment]
 
 
-_DEFAULT_MODEL = "claude-sonnet-4-5"
+_DEFAULT_MODEL = "gemini-2.5-flash-lite"
 
 
 class PlanTracker:
@@ -45,9 +45,9 @@ class PlanTracker:
         self.model = model
         self._plans: Dict[str, AgentPlan] = {}
 
-        if llm is None and ChatAnthropic is not None:
+        if llm is None and ChatGoogleGenerativeAI is not None:
             try:
-                llm = ChatAnthropic(model=model, temperature=0)
+                llm = ChatGoogleGenerativeAI(model=model, temperature=0)
             except Exception:
                 llm = None
         self.llm = llm

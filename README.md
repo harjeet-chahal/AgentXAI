@@ -94,7 +94,7 @@ AgentXAI/
 
 ## Setup
 
-**Requirements:** Python ≥ 3.11, ~4 GB disk (textbook FAISS index), an Anthropic API key.
+**Requirements:** Python ≥ 3.11, ~4 GB disk (textbook FAISS index), a Google Gemini API key (get one at https://aistudio.google.com/app/apikey).
 
 ```bash
 git clone https://github.com/harjeetschahal/AgentXAI
@@ -106,7 +106,7 @@ source venv/bin/activate          # Windows: venv\Scripts\activate
 pip install -r requirements.txt   # or: make install
 
 cp .env.example .env
-# Edit .env — set ANTHROPIC_API_KEY (required) and OPENAI_API_KEY (optional)
+# Edit .env — set GOOGLE_API_KEY (required) and OPENAI_API_KEY (optional)
 ```
 
 Build the FAISS textbook index (one-time, ~5 min on CPU):

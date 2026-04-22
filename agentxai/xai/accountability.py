@@ -46,14 +46,14 @@ from agentxai.xai.causal_dag import CausalDAGBuilder
 from agentxai.xai.counterfactual_engine import CounterfactualEngine, Pipeline
 
 try:  # Optional runtime dep — tests inject a fake LLM instead.
-    from langchain_anthropic import ChatAnthropic
+    from langchain_google_genai import ChatGoogleGenerativeAI
 except ImportError:  # pragma: no cover - optional
-    ChatAnthropic = None  # type: ignore[assignment]
+    ChatGoogleGenerativeAI = None  # type: ignore[assignment]
 
 
 _log = logging.getLogger(__name__)
 
-_DEFAULT_MODEL = "claude-sonnet-4-5"
+_DEFAULT_MODEL = "gemini-2.5-flash-lite"
 _NON_SPECIALIST_AGENTS = {"orchestrator", "synthesizer", "planner", "router", ""}
 _FINAL_EVENT_TYPES = {"final_diagnosis", "diagnosis_final"}
 
@@ -74,9 +74,9 @@ class AccountabilityReportGenerator:
         self._specialists = list(specialist_agents) if specialist_agents else None
         self.model = model
 
-        if llm is None and ChatAnthropic is not None:
+        if llm is None and ChatGoogleGenerativeAI is not None:
             try:
-                llm = ChatAnthropic(model=model, temperature=0)
+                llm = ChatGoogleGenerativeAI(model=model, temperature=0)
             except Exception:
                 llm = None
         self.llm = llm

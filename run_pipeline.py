@@ -32,6 +32,10 @@ import sys
 import uuid
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+from dotenv import load_dotenv
+
+load_dotenv(override=True)
+
 from agentxai.agents.base import make_default_llm
 from agentxai.agents.orchestrator import Orchestrator
 from agentxai.agents.specialist_a import SpecialistA

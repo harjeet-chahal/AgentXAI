@@ -1,12 +1,12 @@
 """
 Synthesizer — reads both specialists' memories and produces the final
 diagnosis. No tools are called; this agent's only side effect (besides
-log_action / memory writes) is one LLM call to Claude.
+log_action / memory writes) is one LLM call to Gemini.
 
 Pipeline (one ``active_plan``):
 
 1. ``read_specialist_memories`` — snapshot Specialist A and B's memory dicts
-2. ``synthesize_diagnosis``     — single Claude call with strict JSON contract
+2. ``synthesize_diagnosis``     — single Gemini call with strict JSON contract
 
 Returns and writes to memory:
 
@@ -98,7 +98,7 @@ class Synthesizer(TracedAgent):
                 outcome=f"a:{len(mem_a)} keys, b:{len(mem_b)} keys",
             )
 
-            # 2. Single Claude call with strict JSON contract
+            # 2. Single Gemini call with strict JSON contract
             result = self._synthesize(case, options, mem_a, mem_b)
             self.log_action(
                 "synthesize_diagnosis",
@@ -138,7 +138,7 @@ class Synthesizer(TracedAgent):
         try:
             response = self.llm.invoke(prompt)
         except Exception as exc:
-            return _empty_result(f"LLM error: {type(exc).__name__}")
+            return _empty_result(f"LLM error: {type(exc).__name__}: {exc}")
 
         raw = extract_text(response)
         parsed = parse_json_object(raw)
