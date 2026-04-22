@@ -58,3 +58,5 @@ htmlcov/
 # Logs
 *.log
 logs/
+
+med_qa/
