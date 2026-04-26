@@ -94,7 +94,7 @@ AgentXAI/
 
 ## Setup
 
-**Requirements:** Python ≥ 3.11, ~4 GB disk (textbook FAISS index), a Google Gemini API key (get one at https://aistudio.google.com/app/apikey).
+**Requirements:** Python ≥ 3.11, ~4 GB disk (textbook FAISS index), a Google Gemini API key (free tier; get one at https://aistudio.google.com/app/apikey).
 
 ```bash
 git clone https://github.com/harjeetschahal/AgentXAI

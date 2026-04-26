@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 import networkx as nx
@@ -74,7 +75,11 @@ class AccountabilityReportGenerator:
         self._specialists = list(specialist_agents) if specialist_agents else None
         self.model = model
 
-        if llm is None and ChatGoogleGenerativeAI is not None:
+        if (
+            llm is None
+            and ChatGoogleGenerativeAI is not None
+            and os.environ.get("GOOGLE_API_KEY")
+        ):
             try:
                 llm = ChatGoogleGenerativeAI(model=model, temperature=0)
             except Exception:

@@ -4,7 +4,7 @@ Pillar 2 — Plans.
 PlanTracker captures each agent's intended actions at the start of its run,
 records what it actually does, and — on finalize — computes the symmetric
 set difference (order-preserving) between the two lists and asks Gemini
-(gemini-2.5-flash via langchain-google-genai) to produce one sentence of
+(gemini-2.5-flash-lite via langchain-google-genai) to produce one sentence of
 reasoning per deviation, grounded in the agent's recent trajectory.
 
 All plans are persisted through TrajectoryStore.save_plan. An in-memory
@@ -15,6 +15,7 @@ during a run — the store holds snapshots after each mutation.
 from __future__ import annotations
 
 import json
+import os
 import re
 from typing import Any, Dict, List, Optional
 
@@ -45,7 +46,11 @@ class PlanTracker:
         self.model = model
         self._plans: Dict[str, AgentPlan] = {}
 
-        if llm is None and ChatGoogleGenerativeAI is not None:
+        if (
+            llm is None
+            and ChatGoogleGenerativeAI is not None
+            and os.environ.get("GOOGLE_API_KEY")
+        ):
             try:
                 llm = ChatGoogleGenerativeAI(model=model, temperature=0)
             except Exception:

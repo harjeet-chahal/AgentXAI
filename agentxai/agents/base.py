@@ -23,6 +23,8 @@ trajectory log.
 from __future__ import annotations
 
 import contextlib
+import json
+import os
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Iterator, List, Optional
 
@@ -34,7 +36,7 @@ from agentxai.xai.trajectory_logger import TrajectoryLogger
 
 
 # ---------------------------------------------------------------------------
-# Default LLM factory (Gemini via langchain-google-genai)
+# Default LLM factory (Gemini via langchain-google-genai, direct Google API)
 # ---------------------------------------------------------------------------
 
 DEFAULT_LLM_MODEL = "gemini-2.5-flash-lite"
@@ -46,15 +48,15 @@ def make_default_llm(
     temperature: float = DEFAULT_LLM_TEMPERATURE,
 ) -> Any:
     """
-    Best-effort: instantiate ``ChatGoogleGenerativeAI(model, temperature=0)``
-    and return it. Returns ``None`` if langchain-google-genai is not installed
-    or the client cannot be constructed (e.g. missing ``GOOGLE_API_KEY``).
-    Callers that must have a working LLM should check for ``None`` and raise.
+    Best-effort: instantiate ``ChatGoogleGenerativeAI`` and return it. Returns
+    ``None`` if langchain-google-genai is missing, ``GOOGLE_API_KEY`` is unset,
+    or construction fails. Callers that must have a working LLM should check
+    for ``None`` and raise.
 
-    Safety filters are set to BLOCK_NONE across all categories. MedQA cases
-    routinely contain drug names, overdose scenarios, suicidal ideation and
-    other content Gemini's defaults (BLOCK_MEDIUM_AND_ABOVE) flag, which
-    silently returns empty content and breaks the JSON-contract prompts.
+    Safety filters are forced to BLOCK_NONE across all categories — MedQA
+    cases regularly contain drug names, overdose scenarios and other content
+    Gemini's defaults flag, which silently returns empty content and breaks
+    the JSON-contract prompts.
     """
     try:
         from langchain_google_genai import (
@@ -63,6 +65,8 @@ def make_default_llm(
             HarmCategory,
         )
     except ImportError:
+        return None
+    if not os.environ.get("GOOGLE_API_KEY"):
         return None
 
     safety_settings = {
@@ -103,6 +107,12 @@ class TracedAgent(ABC):
         # Stack of active plan_ids so nested ``active_plan`` blocks behave
         # predictably; ``log_action`` attributes to the innermost plan.
         self._plan_stack: List[str] = []
+
+        # Rolling snapshot of the agent's memory after the most recent
+        # ``log_action`` call. The next action's ``state_before`` is this
+        # value; its ``state_after`` replaces it. Populates the otherwise
+        # empty state_before / state_after fields on TrajectoryEvent.
+        self._last_state_snapshot: Dict[str, Any] = {}
 
     # ------------------------------------------------------------------
     # Plan API
@@ -172,13 +182,25 @@ class TracedAgent(ABC):
         if plan_id is not None:
             self.plan_tracker.record_actual_action(plan_id, action)
 
-        return self.trajectory_logger.log_event(
+        state_after = self._snapshot_own_memory()
+        event = self.trajectory_logger.log_event(
             agent_id=self.agent_id,
             event_type="action",
+            state_before=self._last_state_snapshot,
             action=action,
             action_inputs=dict(inputs or {}),
+            state_after=state_after,
             outcome=outcome,
         )
+        self._last_state_snapshot = state_after
+        return event
+
+    def _snapshot_own_memory(self) -> Dict[str, Any]:
+        """JSON-safe deep copy of the agent's current memory dict."""
+        try:
+            return json.loads(json.dumps(dict(self.memory), default=str))
+        except (TypeError, ValueError):
+            return {k: str(v) for k, v in dict(self.memory).items()}
 
     # ------------------------------------------------------------------
     # Message API

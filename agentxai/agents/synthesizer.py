@@ -6,7 +6,7 @@ log_action / memory writes) is one LLM call to Gemini.
 Pipeline (one ``active_plan``):
 
 1. ``read_specialist_memories`` — snapshot Specialist A and B's memory dicts
-2. ``synthesize_diagnosis``     — single Gemini call with strict JSON contract
+2. ``synthesize_diagnosis``     — single LLM call with strict JSON contract
 
 Returns and writes to memory:
 
@@ -98,15 +98,14 @@ class Synthesizer(TracedAgent):
                 outcome=f"a:{len(mem_a)} keys, b:{len(mem_b)} keys",
             )
 
-            # 2. Single Gemini call with strict JSON contract
+            # 2. Single LLM call with strict JSON contract
             result = self._synthesize(case, options, mem_a, mem_b)
+            self.memory["final_output"] = result
             self.log_action(
                 "synthesize_diagnosis",
                 {"case_chars": len(case)},
                 outcome=result.get("final_diagnosis", "") or "no diagnosis",
             )
-
-            self.memory["final_output"] = result
 
         return result
 

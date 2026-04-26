@@ -119,9 +119,10 @@ class Pipeline:
 
         case = record.get("question") or record.get("patient_case", "") or ""
         options = dict(record.get("options") or {})
+        correct_letter = record.get("answer_idx") or record.get("answer", "")
         ground_truth = {
-            "correct_answer": record.get("answer", ""),
-            "answer_text":    options.get(record.get("answer", ""), ""),
+            "correct_answer": correct_letter,
+            "answer_text":    options.get(correct_letter, "") or record.get("answer", ""),
             "explanation":    record.get("meta_info", ""),
         }
 
