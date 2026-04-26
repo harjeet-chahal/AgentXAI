@@ -15,17 +15,11 @@ during a run — the store holds snapshots after each mutation.
 from __future__ import annotations
 
 import json
-import os
 import re
 from typing import Any, Dict, List, Optional
 
 from agentxai.data.schemas import AgentPlan, TrajectoryEvent
 from agentxai.store.trajectory_store import TrajectoryStore
-
-try:  # Optional runtime dep — tests inject a fake LLM instead.
-    from langchain_google_genai import ChatGoogleGenerativeAI
-except ImportError:  # pragma: no cover - optional
-    ChatGoogleGenerativeAI = None  # type: ignore[assignment]
 
 
 _DEFAULT_MODEL = "gemini-2.5-flash-lite"
@@ -46,15 +40,9 @@ class PlanTracker:
         self.model = model
         self._plans: Dict[str, AgentPlan] = {}
 
-        if (
-            llm is None
-            and ChatGoogleGenerativeAI is not None
-            and os.environ.get("GOOGLE_API_KEY")
-        ):
-            try:
-                llm = ChatGoogleGenerativeAI(model=model, temperature=0)
-            except Exception:
-                llm = None
+        if llm is None:
+            from agentxai._llm_factory import build_gemini_llm
+            llm = build_gemini_llm(model=model, temperature=0)
         self.llm = llm
 
     # ------------------------------------------------------------------

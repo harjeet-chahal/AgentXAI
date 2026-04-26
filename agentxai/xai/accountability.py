@@ -27,7 +27,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 import networkx as nx
@@ -45,12 +44,6 @@ from agentxai.data.schemas import (
 from agentxai.store.trajectory_store import TrajectoryStore
 from agentxai.xai.causal_dag import CausalDAGBuilder
 from agentxai.xai.counterfactual_engine import CounterfactualEngine, Pipeline
-
-try:  # Optional runtime dep — tests inject a fake LLM instead.
-    from langchain_google_genai import ChatGoogleGenerativeAI
-except ImportError:  # pragma: no cover - optional
-    ChatGoogleGenerativeAI = None  # type: ignore[assignment]
-
 
 _log = logging.getLogger(__name__)
 
@@ -75,15 +68,9 @@ class AccountabilityReportGenerator:
         self._specialists = list(specialist_agents) if specialist_agents else None
         self.model = model
 
-        if (
-            llm is None
-            and ChatGoogleGenerativeAI is not None
-            and os.environ.get("GOOGLE_API_KEY")
-        ):
-            try:
-                llm = ChatGoogleGenerativeAI(model=model, temperature=0)
-            except Exception:
-                llm = None
+        if llm is None:
+            from agentxai._llm_factory import build_gemini_llm
+            llm = build_gemini_llm(model=model, temperature=0)
         self.llm = llm
 
     # ------------------------------------------------------------------

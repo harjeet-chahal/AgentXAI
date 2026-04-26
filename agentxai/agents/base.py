@@ -24,7 +24,6 @@ from __future__ import annotations
 
 import contextlib
 import json
-import os
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Iterator, List, Optional
 
@@ -37,6 +36,10 @@ from agentxai.xai.trajectory_logger import TrajectoryLogger
 
 # ---------------------------------------------------------------------------
 # Default LLM factory (Gemini via langchain-google-genai, direct Google API)
+#
+# Reads keys from GOOGLE_API_KEYS (comma-separated, plural) or GOOGLE_API_KEY
+# (single). Multiple keys → automatic round-robin with 429 fall-over via
+# RotatingGeminiLLM. See agentxai/_llm_factory.py for details.
 # ---------------------------------------------------------------------------
 
 DEFAULT_LLM_MODEL = "gemini-2.5-flash-lite"
@@ -47,42 +50,9 @@ def make_default_llm(
     model: str = DEFAULT_LLM_MODEL,
     temperature: float = DEFAULT_LLM_TEMPERATURE,
 ) -> Any:
-    """
-    Best-effort: instantiate ``ChatGoogleGenerativeAI`` and return it. Returns
-    ``None`` if langchain-google-genai is missing, ``GOOGLE_API_KEY`` is unset,
-    or construction fails. Callers that must have a working LLM should check
-    for ``None`` and raise.
-
-    Safety filters are forced to BLOCK_NONE across all categories — MedQA
-    cases regularly contain drug names, overdose scenarios and other content
-    Gemini's defaults flag, which silently returns empty content and breaks
-    the JSON-contract prompts.
-    """
-    try:
-        from langchain_google_genai import (
-            ChatGoogleGenerativeAI,
-            HarmBlockThreshold,
-            HarmCategory,
-        )
-    except ImportError:
-        return None
-    if not os.environ.get("GOOGLE_API_KEY"):
-        return None
-
-    safety_settings = {
-        HarmCategory.HARM_CATEGORY_HARASSMENT:        HarmBlockThreshold.BLOCK_NONE,
-        HarmCategory.HARM_CATEGORY_HATE_SPEECH:       HarmBlockThreshold.BLOCK_NONE,
-        HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
-        HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
-    }
-    try:
-        return ChatGoogleGenerativeAI(
-            model=model,
-            temperature=temperature,
-            safety_settings=safety_settings,
-        )
-    except Exception:
-        return None
+    """Thin wrapper around ``agentxai._llm_factory.build_gemini_llm``."""
+    from agentxai._llm_factory import build_gemini_llm
+    return build_gemini_llm(model=model, temperature=temperature)
 
 
 class TracedAgent(ABC):
