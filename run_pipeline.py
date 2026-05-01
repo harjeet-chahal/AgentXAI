@@ -27,12 +27,15 @@ and returns the perturbed final output.
 from __future__ import annotations
 
 import argparse
+import logging
 import re
 import sys
 import uuid
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from dotenv import load_dotenv
+
+_log = logging.getLogger(__name__)
 
 load_dotenv(override=True)
 
@@ -117,9 +120,42 @@ class Pipeline:
         task_id = str(uuid.uuid4())
         store = self._open_store()
 
+        # Accept both shapes:
+        #   1. Flat MedQA: {question, options, answer_idx, ...}
+        #   2. Nested UI:  {input: {patient_case, answer_options},
+        #                   ground_truth: {correct_answer, explanation}}
+        # The nested shape was previously surfaced by the dashboard's default
+        # template; pipelines silently produced empty cases when given it.
+        # Flatten it here so submission shape never matters.
+        if not record.get("question") and not record.get("patient_case"):
+            inp = record.get("input") or {}
+            gt = record.get("ground_truth") or {}
+            if isinstance(inp, dict) and (
+                inp.get("patient_case") or inp.get("answer_options")
+            ):
+                record = {
+                    **record,
+                    "question": inp.get("patient_case") or inp.get("question") or "",
+                    "options": (
+                        inp.get("answer_options")
+                        or inp.get("options")
+                        or {}
+                    ),
+                    "answer_idx": (
+                        gt.get("correct_answer")
+                        or record.get("answer_idx")
+                        or ""
+                    ),
+                    "meta_info": (
+                        gt.get("explanation")
+                        or record.get("meta_info")
+                        or ""
+                    ),
+                }
+
         case = record.get("question") or record.get("patient_case", "") or ""
         options = dict(record.get("options") or {})
-        correct_letter = record.get("answer_idx") or record.get("answer", "")
+        correct_letter = _resolve_correct_letter(record)
         ground_truth = {
             "correct_answer": correct_letter,
             "answer_text":    options.get(correct_letter, "") or record.get("answer", ""),
@@ -186,19 +222,30 @@ class Pipeline:
                     score=score,
                     counterfactual_run_id=task_id,
                 )
-            except Exception:
+            except Exception as exc:
+                _log.warning(
+                    "tool perturbation failed for tool_call_id=%s (%s): %s",
+                    tc.tool_call_id, tc.tool_name, exc,
+                )
                 continue
         for agent_id in ("specialist_a", "specialist_b"):
             try:
                 engine.perturb_agent_output(agent_id)
-            except Exception:
+            except Exception as exc:
+                _log.warning(
+                    "agent_output perturbation failed for %s: %s", agent_id, exc,
+                )
                 continue
         for m in full_record.xai_data.messages:
             try:
                 changed, description = engine.perturb_message(m.message_id)
                 if changed:
                     loggers["message_logger"].mark_acted_upon(m.message_id, description)
-            except Exception:
+            except Exception as exc:
+                _log.warning(
+                    "message perturbation failed for message_id=%s: %s",
+                    m.message_id, exc,
+                )
                 continue
 
         # 6. Causal DAG.
@@ -482,7 +529,36 @@ def _last_write_state(memory_diffs, agent_id: str) -> Dict[str, Any]:
     return state
 
 
+def _resolve_correct_letter(record: dict) -> str:
+    """
+    Pull the ground-truth option letter ("A"–"E") out of a record regardless
+    of whether it came from the raw MedQA JSONL (answer_idx is a letter
+    string), load_medqa_us's normalised output (answer_idx is an int 0–4 and
+    answer is the letter), or a UI submission (mixed).
+    """
+    raw = record.get("answer_idx")
+    if isinstance(raw, int):
+        return chr(ord("A") + raw) if 0 <= raw < 26 else ""
+    if isinstance(raw, str) and raw.strip():
+        s = raw.strip()
+        if s.isdigit():
+            i = int(s)
+            return chr(ord("A") + i) if 0 <= i < 26 else ""
+        return s.upper()
+    answer = str(record.get("answer", "")).strip()
+    if len(answer) == 1 and answer.upper().isalpha():
+        return answer.upper()
+    return ""
+
+
 _WORD_RE = re.compile(r"[A-Za-z0-9]+")
+# Matches a leading option-letter token: bare ("A"), with delimiter ("A.",
+# "A:", "A) text"), or wrapped in brackets ("(A)", "[A]"). The trailing
+# delimiter or end-of-string requirement is what stops "Acute" from being
+# read as "A" + "cute".
+_LEADING_LETTER_RE = re.compile(
+    r"^\s*[\(\[]?([A-Za-z])(?:[\)\].:\-\s]|$)"
+)
 
 
 def _match_option_letter(
@@ -492,13 +568,32 @@ def _match_option_letter(
     """
     Map a free-text diagnosis to the best matching answer-option letter.
 
-    Strategy: pick the option with the highest token-overlap score against
-    the diagnosis (Jaccard over lowercased word tokens). Ties broken by
-    earliest letter. Returns ("", "") if no options or no overlap at all.
+    Two-stage strategy:
+
+      1. **Letter-prefix shortcut.** If the diagnosis starts with a bare
+         option-letter token — "A", "A.", "A:", "A) Aldosterone excess",
+         "(A)", etc. — we accept that letter directly. Without this, a
+         synthesizer that returns just the letter (which Gemini sometimes
+         does despite prompting for the disease name) gets scored as
+         incorrect even when the letter matches the ground truth.
+
+      2. **Token-overlap fallback.** Otherwise pick the option with the
+         highest Jaccard score against the diagnosis text. Ties broken by
+         earliest letter. Returns ("", "") if no options or zero overlap.
     """
     if not diagnosis or not options:
         return "", ""
 
+    # ----- Stage 1: leading-letter shortcut --------------------------------
+    upper_keys = {k.upper(): k for k in options.keys()}
+    m = _LEADING_LETTER_RE.match(diagnosis)
+    if m:
+        letter = m.group(1).upper()
+        if letter in upper_keys:
+            actual_key = upper_keys[letter]
+            return letter, options.get(actual_key, "") or ""
+
+    # ----- Stage 2: token-overlap fallback ---------------------------------
     dx_tokens = set(t.lower() for t in _WORD_RE.findall(diagnosis))
     if not dx_tokens:
         return "", ""

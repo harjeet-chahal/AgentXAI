@@ -237,14 +237,30 @@ def _neutral_baseline(value: Any) -> Any:
     return {}
 
 
+_DX_WEIGHT = 0.6
+_CONF_WEIGHT = 0.4
+
+
 def _outcome_delta(orig: Dict[str, Any], perturbed: Dict[str, Any]) -> float:
     """
-    0.0 if the final diagnosis is identical, else 1.0; plus the absolute
-    confidence difference; capped at 1.0.
+    Graded counterfactual outcome delta in [0, 1].
+
+    Combines two signals as a weighted sum so neither saturates the score on
+    its own — a diagnosis flip with unchanged confidence no longer maxes out
+    at 1.0, leaving room for confidence shifts to differentiate.
+
+      score = 0.6 * dx_changed (binary)  +  0.4 * conf_delta (continuous)
+
+    Reference points:
+        identical                      → 0.00
+        dx unchanged, conf delta 0.50  → 0.20
+        dx changed,   conf unchanged   → 0.60
+        dx changed,   conf delta 0.50  → 0.80
+        dx changed,   conf delta 1.00  → 1.00
     """
     orig_dx = orig.get("final_diagnosis")
     new_dx = perturbed.get("final_diagnosis")
-    base = 0.0 if orig_dx == new_dx else 1.0
+    dx_changed = 0.0 if orig_dx == new_dx else 1.0
     try:
         conf_delta = abs(
             float(orig.get("confidence", 0.0))
@@ -252,7 +268,8 @@ def _outcome_delta(orig: Dict[str, Any], perturbed: Dict[str, Any]) -> float:
         )
     except (TypeError, ValueError):
         conf_delta = 0.0
-    return min(1.0, base + conf_delta)
+    conf_delta = max(0.0, min(1.0, conf_delta))
+    return min(1.0, _DX_WEIGHT * dx_changed + _CONF_WEIGHT * conf_delta)
 
 
 def _describe_change(

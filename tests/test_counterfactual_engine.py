@@ -98,20 +98,47 @@ class TestNeutralBaseline:
 
 
 class TestOutcomeDelta:
+    """
+    Outcome delta is a graded weighted sum (0.6 * dx_changed + 0.4 * conf_delta)
+    so neither signal saturates the score on its own. A diagnosis flip with
+    unchanged confidence no longer maxes out at 1.0 — that frees the score
+    to reflect *how much* downstream behavior shifted, not just whether it
+    crossed the answer boundary.
+    """
+
     def test_identical(self):
         assert _outcome_delta(ORIGINAL, dict(ORIGINAL)) == 0.0
 
-    def test_diagnosis_changed(self):
+    def test_diagnosis_changed_only(self):
+        # dx flip alone, same confidence → 0.6 (the dx weight).
         d = _outcome_delta(ORIGINAL, {"final_diagnosis": "PE", "confidence": 0.9})
-        assert d == 1.0
+        assert d == pytest.approx(0.6)
 
     def test_confidence_only_delta(self):
+        # |0.9 - 0.4| = 0.5, weighted by 0.4 → 0.20.
         d = _outcome_delta(ORIGINAL, {"final_diagnosis": "MI", "confidence": 0.4})
-        assert d == pytest.approx(0.5)
+        assert d == pytest.approx(0.2)
 
-    def test_capped_at_one(self):
+    def test_dx_flip_plus_conf_drop_saturates_to_one(self):
+        # dx flip (0.6) + |0.9 - 0.1| * 0.4 = 0.6 + 0.32 = 0.92.
         d = _outcome_delta(ORIGINAL, {"final_diagnosis": "PE", "confidence": 0.1})
-        assert d == 1.0
+        assert d == pytest.approx(0.92)
+
+    def test_strictly_bounded_in_unit_interval(self):
+        # Even with a confidence delta exceeding 1.0 (malformed input),
+        # the score must clamp to [0, 1].
+        d = _outcome_delta(ORIGINAL, {"final_diagnosis": "PE", "confidence": -2.0})
+        assert 0.0 <= d <= 1.0
+
+    def test_dx_flip_dominates_pure_confidence_shift(self):
+        # A diagnosis flip should out-rank any same-diagnosis confidence shift.
+        flip = _outcome_delta(
+            ORIGINAL, {"final_diagnosis": "PE", "confidence": 0.9}
+        )
+        conf_only = _outcome_delta(
+            ORIGINAL, {"final_diagnosis": "MI", "confidence": 0.0}
+        )
+        assert flip > conf_only
 
 
 # ---------------------------------------------------------------------------
@@ -136,7 +163,8 @@ class TestPerturbToolOutput:
         )
         score = engine.perturb_tool_output(tool_call.tool_call_id)
         assert 0.0 <= score <= 1.0
-        assert score == 1.0  # capped: diff dx (1.0) + |0.9-0.7|=0.2 → min(1, 1.2)
+        # graded delta: 0.6 * 1 (dx flipped) + 0.4 * |0.9 - 0.7| = 0.68
+        assert score == pytest.approx(0.68)
 
     def test_passes_baseline_via_overrides(self, store, tool_call):
         pipe = MockPipeline(dict(ORIGINAL))
@@ -188,7 +216,8 @@ class TestPerturbAgentOutput:
             original_output=ORIGINAL,
         )
         score = engine.perturb_agent_output("specialist_a")
-        assert score == pytest.approx(0.3)
+        # graded delta: 0 (dx unchanged) + 0.4 * |0.9 - 0.6| = 0.12
+        assert score == pytest.approx(0.12)
 
     def test_overrides_carry_empty_memory(self, store):
         pipe = MockPipeline(dict(ORIGINAL))

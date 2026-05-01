@@ -201,10 +201,72 @@ class TestHelpers:
             agent_responsibility_scores={"specialist_a": 0.7, "specialist_b": 0.3},
             root_cause_event_id="e2", causal_chain=["e2", "e3", "e7"],
         )
+        # No xai supplied — fallback still mentions the top agent and must
+        # not leak any raw UUIDs into the sentence.
         s = _fallback_explanation(r)
         assert "specialist_a" in s
         assert "MI" in s
         assert "correct" in s
+        assert "e2" not in s  # raw event_id must not leak
+
+    def test_fallback_explanation_credits_tied_agents(self):
+        from agentxai.data.schemas import AccountabilityReport
+        # Exact 0.50 / 0.50 tie — neither agent should be singled out.
+        r = AccountabilityReport(
+            final_outcome="GBC", outcome_correct=True,
+            agent_responsibility_scores={"specialist_a": 0.50, "specialist_b": 0.50},
+            root_cause_event_id="e1", causal_chain=["e1"],
+        )
+        s = _fallback_explanation(r)
+        # Both agents appear, joined as a shared/tied attribution.
+        assert "specialist_a" in s
+        assert "specialist_b" in s
+        # And the language should reflect the tie, not pick one.
+        assert "shared" in s.lower() or "tied" in s.lower() or " and " in s
+
+    def test_fallback_explanation_singles_out_clear_winner(self):
+        from agentxai.data.schemas import AccountabilityReport
+        # 0.97 vs 0.03 — clearly not tied; only specialist_a should be named.
+        r = AccountabilityReport(
+            final_outcome="DT", outcome_correct=True,
+            agent_responsibility_scores={"specialist_a": 0.97, "specialist_b": 0.03},
+            root_cause_event_id="e1", causal_chain=["e1"],
+        )
+        s = _fallback_explanation(r)
+        assert "specialist_a" in s
+        # specialist_b shouldn't be credited at all when this lopsided.
+        assert "specialist_b" not in s
+
+    def test_fallback_explanation_resolves_uuids_when_xai_provided(self):
+        from agentxai.data.schemas import (
+            AccountabilityReport,
+            XAIData,
+        )
+        ev = TrajectoryEvent(
+            event_id="e2", agent_id="specialist_a",
+            event_type="tool_call", action="symptom_lookup",
+        )
+        tc = ToolUseEvent(
+            tool_name="symptom_lookup",
+            called_by="specialist_a",
+            inputs={}, outputs={}, duration_ms=10.0,
+        )
+        tc.downstream_impact_score = 0.82
+        xai = XAIData(trajectory=[ev], tool_calls=[tc])
+
+        r = AccountabilityReport(
+            final_outcome="MI", outcome_correct=True,
+            agent_responsibility_scores={"specialist_a": 0.7, "specialist_b": 0.3},
+            root_cause_event_id="e2",
+            most_impactful_tool_call_id=tc.tool_call_id,
+            causal_chain=["e2"],
+        )
+        s = _fallback_explanation(r, xai)
+        # Tool surfaces by name, root cause by event_type + agent — never by UUID.
+        assert "symptom_lookup" in s
+        assert tc.tool_call_id not in s
+        assert "tool_call" in s
+        assert "specialist_a" in s
 
 
 # ---------------------------------------------------------------------------
@@ -260,12 +322,18 @@ class TestGenerate:
         # LLM explanation used.
         assert report.one_line_explanation
         assert report.one_line_explanation == llm.text
-        # Prompt must reference the structured fields, not invent external ones.
+        # Prompt must reference the resolved structured fields and explicitly
+        # forbid leaking raw UUIDs into the explanation.
         assert len(llm.prompts) == 1
         prompt = llm.prompts[0]
-        assert "root_cause_event_id" in prompt
+        assert "root_cause_event" in prompt
         assert "agent_responsibility_scores" in prompt
+        assert "most_impactful_tool_call" in prompt
         assert "structured fields" in prompt.lower()
+        # The resolver should embed tool_name, agent_id, etc. — not raw IDs.
+        assert "tool_name" in prompt
+        # And the rules must include the no-UUID instruction.
+        assert "uuid" in prompt.lower() or "tool_call_ids" in prompt.lower()
 
         # Persisted.
         persisted = store.get_full_record(TASK_ID).xai_data.accountability_report

@@ -122,7 +122,7 @@ class AccountabilityReportGenerator:
             plan_deviation_summary=deviation_summary,
             one_line_explanation="",
         )
-        report.one_line_explanation = self._explain(report)
+        report.one_line_explanation = self._explain(report, xai)
 
         self.store.save_accountability_report(report)
         return report
@@ -254,16 +254,16 @@ class AccountabilityReportGenerator:
     # LLM explanation
     # ------------------------------------------------------------------
 
-    def _explain(self, report: AccountabilityReport) -> str:
+    def _explain(self, report: AccountabilityReport, xai: XAIData) -> str:
         if self.llm is None:
-            return _fallback_explanation(report)
-        prompt = _build_explanation_prompt(report)
+            return _fallback_explanation(report, xai)
+        prompt = _build_explanation_prompt(report, xai)
         try:
             response = self.llm.invoke(prompt)
             text_out = _extract_text(response).strip()
         except Exception:
-            return _fallback_explanation(report)
-        return text_out or _fallback_explanation(report)
+            return _fallback_explanation(report, xai)
+        return text_out or _fallback_explanation(report, xai)
 
 
 # ---------------------------------------------------------------------------
@@ -292,11 +292,18 @@ def _graph_from_record(xai: XAIData) -> nx.DiGraph:
 
 
 def _most_impactful_tool(xai: XAIData) -> str:
+    """
+    Return the tool_call_id with the highest counterfactual impact score.
+
+    Even when every tool call yields a 0.0 delta — common with deterministic
+    LLM specialists that are robust to single-tool ablation — we still return
+    the highest-scored call so the dashboard surfaces a representative tool
+    rather than "Not recorded". The score itself stays honest (0.00), so the
+    UI / explanation can flag the no-measurable-impact case explicitly.
+    """
     if not xai.tool_calls:
         return ""
     best = max(xai.tool_calls, key=lambda t: float(t.downstream_impact_score or 0.0))
-    if float(best.downstream_impact_score or 0.0) <= 0.0:
-        return ""
     return best.tool_call_id
 
 
@@ -342,27 +349,114 @@ def _normalize_to_one(scores: Dict[str, float]) -> Dict[str, float]:
 
 
 # ---------------------------------------------------------------------------
+# UUID-to-entity resolvers (used by both LLM prompt and fallback)
+# ---------------------------------------------------------------------------
+
+def _resolve_tool_call(xai: XAIData, tool_call_id: str) -> Optional[Dict[str, Any]]:
+    if not tool_call_id:
+        return None
+    for tc in xai.tool_calls:
+        if tc.tool_call_id == tool_call_id:
+            return {
+                "tool_name": tc.tool_name,
+                "called_by": tc.called_by,
+                "impact_score": round(float(tc.downstream_impact_score or 0.0), 2),
+            }
+    return None
+
+
+def _resolve_event(xai: XAIData, event_id: str) -> Optional[Dict[str, Any]]:
+    if not event_id:
+        return None
+    for e in xai.trajectory:
+        if e.event_id == event_id:
+            return {
+                "event_type": e.event_type,
+                "agent_id": e.agent_id,
+                "action": e.action or "",
+            }
+    return None
+
+
+def _resolve_message(xai: XAIData, message_id: str) -> Optional[Dict[str, Any]]:
+    if not message_id:
+        return None
+    for m in xai.messages:
+        if m.message_id == message_id:
+            return {
+                "sender": m.sender,
+                "receiver": m.receiver,
+                "message_type": m.message_type,
+                "acted_upon": bool(m.acted_upon),
+            }
+    return None
+
+
+# ---------------------------------------------------------------------------
 # LLM prompting
 # ---------------------------------------------------------------------------
 
-def _build_explanation_prompt(report: AccountabilityReport) -> str:
-    fields = {
+_TIE_EPSILON = 0.05
+
+
+def _tied_top_agents(scores: Dict[str, float]) -> List[str]:
+    """Return all agents within `_TIE_EPSILON` of the top score, ranked."""
+    if not scores:
+        return []
+    ranked = sorted(scores.items(), key=lambda kv: float(kv[1]), reverse=True)
+    top = float(ranked[0][1])
+    return [a for a, s in ranked if top - float(s) < _TIE_EPSILON]
+
+
+def _build_explanation_prompt(report: AccountabilityReport, xai: XAIData) -> str:
+    # Resolve raw UUIDs into descriptive dicts so the LLM never has to
+    # reference an opaque id in its sentence.
+    tool = _resolve_tool_call(xai, report.most_impactful_tool_call_id)
+    # Suppress the tool field when its measured impact is effectively zero —
+    # otherwise the LLM is invited to call a no-op tool "impactful".
+    if tool and float(tool.get("impact_score") or 0.0) <= 0.0:
+        tool = None
+
+    scores = report.agent_responsibility_scores or {}
+    tied = _tied_top_agents(scores)
+
+    fields: Dict[str, Any] = {
         "final_outcome": report.final_outcome,
         "outcome_correct": report.outcome_correct,
-        "agent_responsibility_scores": report.agent_responsibility_scores,
-        "root_cause_event_id": report.root_cause_event_id,
+        "agent_responsibility_scores": {
+            agent: round(float(score), 2)
+            for agent, score in scores.items()
+        },
+        # Pre-computed: agents within 0.05 of the top responsibility score.
+        # If this list has more than one entry, the responsibility split is
+        # essentially a tie — the explanation must acknowledge all of them.
+        "tied_top_agents": tied,
+        "root_cause_event": _resolve_event(xai, report.root_cause_event_id),
+        "most_impactful_tool_call": tool,
+        "most_influential_message": _resolve_message(
+            xai, report.most_influential_message_id
+        ),
         "causal_chain_length": len(report.causal_chain),
-        "most_impactful_tool_call_id": report.most_impactful_tool_call_id,
         "critical_memory_diff_count": len(report.critical_memory_diffs),
-        "most_influential_message_id": report.most_influential_message_id,
         "plan_deviation_summary": report.plan_deviation_summary,
     }
     return (
         "You are writing the one-sentence accountability summary for a "
         "multi-agent medical-triage run. Use ONLY the structured fields below "
         "— do not invent any entities, agents, tools, or diagnoses that are "
-        "not named there. Return ONE plain English sentence, no markdown, no "
-        "preamble.\n\n"
+        "not named there.\n\n"
+        "FORMAT RULES:\n"
+        "  * Refer to entities by their human-readable fields only "
+        "(tool_name, agent_id, event_type, sender→receiver). NEVER quote "
+        "raw UUIDs, event_ids, message_ids, or tool_call_ids.\n"
+        "  * If most_impactful_tool_call is null, do NOT claim any tool was "
+        "impactful — focus the sentence on the responsible agent and the "
+        "most-influential message instead.\n"
+        "  * If tied_top_agents has more than one entry, do NOT single out "
+        "any one of them as 'primarily responsible' — instead say they "
+        "contributed equally (or jointly drove the outcome). Single out one "
+        "agent only when tied_top_agents has exactly one entry.\n"
+        "  * One plain English sentence, no markdown, no preamble.\n\n"
         f"{json.dumps(fields, indent=2, default=str)}"
     )
 
@@ -380,16 +474,43 @@ def _extract_text(response: Any) -> str:
     return str(content)
 
 
-def _fallback_explanation(report: AccountabilityReport) -> str:
+def _fallback_explanation(
+    report: AccountabilityReport, xai: Optional[XAIData] = None
+) -> str:
     correct = "correct" if report.outcome_correct else "incorrect"
-    top_agent = ""
-    if report.agent_responsibility_scores:
-        top_agent = max(
-            report.agent_responsibility_scores.items(), key=lambda kv: kv[1]
-        )[0]
-    return (
-        f"Diagnosis {report.final_outcome!r} was {correct}; "
-        f"root cause event {report.root_cause_event_id or 'unknown'} "
-        f"with {len(report.causal_chain)}-step causal chain"
-        + (f", largest responsibility on {top_agent}." if top_agent else ".")
-    )
+    parts: List[str] = [f"Diagnosis {report.final_outcome!r} was {correct}"]
+
+    scores = report.agent_responsibility_scores or {}
+    tied = _tied_top_agents(scores)
+    if len(tied) > 1:
+        # Tie — credit the whole group rather than picking one arbitrarily.
+        top_score = float(scores[tied[0]])
+        joined = ", ".join(tied[:-1]) + " and " + tied[-1]
+        parts.append(
+            f"responsibility shared across {joined} "
+            f"({top_score:.2f} each)"
+        )
+    elif tied:
+        agent = tied[0]
+        parts.append(
+            f"largest responsibility on {agent} ({float(scores[agent]):.2f})"
+        )
+
+    if xai is not None:
+        tool = _resolve_tool_call(xai, report.most_impactful_tool_call_id)
+        # Only mention the tool when its measured impact is non-zero —
+        # otherwise the sentence falsely implies the tool drove the outcome.
+        if tool and float(tool.get("impact_score") or 0.0) > 0.0:
+            parts.append(
+                f"most-impactful tool was {tool['tool_name']} "
+                f"called by {tool['called_by']} "
+                f"(impact {tool['impact_score']:.2f})"
+            )
+        root = _resolve_event(xai, report.root_cause_event_id)
+        if root:
+            agent = root.get("agent_id") or "unknown"
+            etype = root.get("event_type") or "event"
+            parts.append(f"rooted in {etype} from {agent}")
+
+    parts.append(f"{len(report.causal_chain)}-step causal chain")
+    return "; ".join(parts) + "."

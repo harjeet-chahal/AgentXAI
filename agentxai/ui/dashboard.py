@@ -40,6 +40,1078 @@ TAB_LABELS = [
     "Accountability",
 ]
 
+# ---------------------------------------------------------------------------
+# Visual foundation — single CSS injection used across the whole dashboard.
+# ---------------------------------------------------------------------------
+
+def inject_css() -> None:
+    """Inject the dashboard's design system on every rerun.
+
+    Streamlit rebuilds the page DOM from scratch on every script run, so the
+    CSS must be re-emitted each time — guarding with session_state would
+    inject only on the first run and leave subsequent reruns unstyled.
+    """
+    st.markdown(
+        """
+        <style>
+          :root {
+            --xai-fg: #1b1b1b;
+            --xai-fg-soft: #3a3f47;
+            --xai-muted: #6b7280;
+            --xai-line: #e6e9ef;
+            --xai-card: #ffffff;
+            --xai-card-soft: #f7f9fc;
+            --xai-accent: #2E86AB;
+            --xai-accent-soft: #eaf2f9;
+            --xai-success: #06A77D;
+            --xai-success-soft: #e7f6f0;
+            --xai-error:   #E63946;
+            --xai-error-soft: #fce9eb;
+            --xai-warn:    #F4A261;
+          }
+
+          /* ---------- Hero (case overview top banner) ---------- */
+          .xai-hero {
+            padding: 34px 38px 28px 38px;
+            background: linear-gradient(135deg, #0e2a47 0%, #143d66 55%, #1d527d 100%);
+            border-radius: 14px;
+            color: #f5f7fa;
+            margin-bottom: 22px;
+            box-shadow: 0 10px 30px rgba(14, 42, 71, 0.18);
+          }
+          .xai-hero-eyebrow {
+            font-size: 0.74rem;
+            letter-spacing: 0.18em;
+            text-transform: uppercase;
+            color: #9bbfe0;
+            font-weight: 600;
+            margin-bottom: 10px;
+          }
+          .xai-hero-title {
+            font-size: 2.1rem;
+            font-weight: 700;
+            line-height: 1.18;
+            color: #fff;
+            margin: 0 0 14px 0;
+          }
+          .xai-hero-meta {
+            display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px;
+          }
+
+          /* ---------- Pills / badges ---------- */
+          .xai-pill {
+            display: inline-flex; align-items: center; gap: 6px;
+            padding: 6px 12px;
+            border-radius: 999px;
+            font-size: 0.82rem;
+            font-weight: 500;
+            background: rgba(255,255,255,0.10);
+            color: #fff;
+            border: 1px solid rgba(255,255,255,0.18);
+          }
+          .xai-pill b { color: #fff; font-weight: 700; }
+          .xai-pill-success {
+            background: rgba(6,167,125,0.22);
+            border-color: rgba(6,167,125,0.45);
+            color: #b9f5dd;
+          }
+          .xai-pill-success b { color: #b9f5dd; }
+          .xai-pill-error {
+            background: rgba(230,57,70,0.22);
+            border-color: rgba(230,57,70,0.45);
+            color: #ffc1c6;
+          }
+          .xai-pill-error b { color: #ffc1c6; }
+
+          /* ---------- Stat cards ---------- */
+          .xai-stat-grid {
+            display: grid;
+            grid-template-columns: repeat(6, 1fr);
+            gap: 12px;
+          }
+          @media (max-width: 1100px) {
+            .xai-stat-grid { grid-template-columns: repeat(3, 1fr); }
+          }
+          .xai-stat {
+            background: var(--xai-card);
+            border: 1px solid var(--xai-line);
+            border-radius: 10px;
+            padding: 14px 16px;
+            transition: border-color 120ms ease, transform 120ms ease;
+          }
+          .xai-stat:hover {
+            border-color: #cdd5e0;
+            transform: translateY(-1px);
+          }
+          .xai-stat-label {
+            font-size: 0.7rem;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: var(--xai-muted);
+            font-weight: 600;
+          }
+          .xai-stat-value {
+            font-size: 1.55rem;
+            font-weight: 700;
+            color: var(--xai-fg);
+            line-height: 1.1;
+            margin-top: 6px;
+          }
+          .xai-stat-sub {
+            font-size: 0.78rem;
+            color: var(--xai-muted);
+            margin-top: 4px;
+          }
+
+          /* ---------- Section header ---------- */
+          .xai-section {
+            font-size: 0.74rem;
+            letter-spacing: 0.10em;
+            text-transform: uppercase;
+            color: var(--xai-muted);
+            font-weight: 700;
+            margin: 22px 0 12px 0;
+            display: flex; align-items: center; gap: 8px;
+          }
+          .xai-section::before {
+            content: ""; display: inline-block;
+            width: 16px; height: 2px; background: var(--xai-accent);
+          }
+
+          /* ---------- Generic content card ---------- */
+          .xai-card {
+            background: var(--xai-card);
+            border: 1px solid var(--xai-line);
+            border-radius: 10px;
+            padding: 16px 18px;
+            height: 100%;
+          }
+          .xai-card.is-accent { border-left: 4px solid var(--xai-accent); }
+          .xai-card.is-success { border-left: 4px solid var(--xai-success); }
+          .xai-card.is-error { border-left: 4px solid var(--xai-error); }
+          .xai-card-eyebrow {
+            font-size: 0.7rem;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: var(--xai-muted);
+            font-weight: 700;
+            margin-bottom: 6px;
+          }
+          .xai-card-title {
+            font-size: 1.05rem;
+            font-weight: 700;
+            color: var(--xai-fg);
+            line-height: 1.3;
+          }
+          .xai-card-sub {
+            font-size: 0.86rem;
+            color: var(--xai-fg-soft);
+            margin-top: 4px;
+            line-height: 1.45;
+          }
+
+          /* ---------- One-line conclusion card ---------- */
+          .xai-conclusion {
+            background: var(--xai-card-soft);
+            border-left: 6px solid var(--xai-accent);
+            border-radius: 10px;
+            padding: 18px 22px;
+          }
+          .xai-conclusion.is-success { border-left-color: var(--xai-success); }
+          .xai-conclusion.is-error { border-left-color: var(--xai-error); }
+          .xai-conclusion-eyebrow {
+            font-size: 0.7rem;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: var(--xai-muted);
+            font-weight: 700;
+            margin-bottom: 8px;
+          }
+          .xai-conclusion-text {
+            font-size: 1.08rem;
+            font-weight: 600;
+            line-height: 1.45;
+            color: var(--xai-fg);
+          }
+
+          /* ---------- Per-tab summary banner ---------- */
+          .xai-summary {
+            background: linear-gradient(180deg, #f1f6fb 0%, #eaf2f9 100%);
+            border-left: 4px solid var(--xai-accent);
+            border-radius: 10px;
+            padding: 16px 20px;
+            margin-bottom: 22px;
+          }
+          .xai-summary-eyebrow {
+            font-size: 0.7rem;
+            letter-spacing: 0.10em;
+            text-transform: uppercase;
+            color: var(--xai-accent);
+            font-weight: 700;
+            margin-bottom: 6px;
+          }
+          .xai-summary-headline {
+            font-size: 0.98rem;
+            line-height: 1.5;
+            color: var(--xai-fg);
+          }
+          .xai-summary ul {
+            margin: 10px 0 0 0;
+            padding-left: 20px;
+            font-size: 0.9rem;
+            line-height: 1.55;
+            color: var(--xai-fg-soft);
+          }
+          .xai-summary code {
+            background: rgba(46,134,171,0.10);
+            padding: 1px 6px;
+            border-radius: 4px;
+            font-size: 0.85em;
+            color: #1d527d;
+          }
+          .xai-summary b { color: var(--xai-fg); }
+
+          /* ---------- Slim case strip (top of pillar pages) ---------- */
+          .xai-strip {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            padding: 12px 18px;
+            background: #fafbfc;
+            border: 1px solid var(--xai-line);
+            border-radius: 10px;
+            margin-bottom: 18px;
+          }
+          .xai-strip-left { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+          .xai-strip-id {
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            font-size: 0.82rem;
+            color: var(--xai-muted);
+          }
+          .xai-strip-dx {
+            font-weight: 700;
+            color: var(--xai-fg);
+            font-size: 0.98rem;
+          }
+          .xai-strip-meta { color: var(--xai-muted); font-size: 0.85rem; }
+          .xai-strip-badge {
+            padding: 4px 10px;
+            border-radius: 999px;
+            font-size: 0.78rem;
+            font-weight: 600;
+          }
+          .xai-strip-badge.is-success {
+            background: var(--xai-success-soft); color: var(--xai-success);
+          }
+          .xai-strip-badge.is-error {
+            background: var(--xai-error-soft); color: var(--xai-error);
+          }
+          .xai-strip-badge.is-neutral {
+            background: var(--xai-accent-soft); color: var(--xai-accent);
+          }
+
+          /* ---------- Responsibility distribution ---------- */
+          .xai-resp-row { display: flex; align-items: center; gap: 12px; margin: 6px 0; }
+          .xai-resp-name {
+            width: 150px;
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            font-size: 0.85rem;
+            color: var(--xai-fg);
+          }
+          .xai-resp-bar {
+            flex: 1;
+            height: 10px;
+            background: #eef0f4;
+            border-radius: 999px;
+            overflow: hidden;
+          }
+          .xai-resp-bar-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #2E86AB 0%, #1d527d 100%);
+            border-radius: 999px;
+          }
+          .xai-resp-val {
+            width: 56px;
+            text-align: right;
+            font-variant-numeric: tabular-nums;
+            font-weight: 700;
+            color: var(--xai-fg);
+            font-size: 0.92rem;
+          }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Per-tab summarizers — return a (headline_html, bullets) tuple. The headline
+# is one short sentence with inline <b> / <code>; bullets are short richer
+# breakdowns rendered as a styled list inside the same banner.
+# ---------------------------------------------------------------------------
+
+Summary = Tuple[str, List[str]]
+
+
+def _sort_by_count(d: Dict[str, int], reverse: bool = True) -> List[Tuple[str, int]]:
+    return sorted(d.items(), key=lambda kv: kv[1], reverse=reverse)
+
+
+def _summarize_trajectory(events: List[Dict[str, Any]]) -> Summary:
+    if not events:
+        return ("No trajectory events recorded for this task.", [])
+
+    by_agent: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    for ev in events:
+        by_agent[ev.get("agent_id") or "unknown"].append(ev)
+
+    times = [
+        ev.get("timestamp") for ev in events
+        if isinstance(ev.get("timestamp"), (int, float))
+    ]
+    span_str = ""
+    if len(times) >= 2:
+        span_str = f", spanning <b>{(max(times) - min(times)):.1f}s</b>"
+
+    sorted_events = sorted(events, key=lambda e: e.get("timestamp", 0))
+    final = sorted_events[-1]
+    final_label = final.get("action") or final.get("event_type") or "event"
+
+    headline = (
+        f"<b>{len(events)} events</b> across <b>{len(by_agent)} agent(s)</b>{span_str}, "
+        f"closing on <code>{final_label}</code>."
+    )
+
+    bullets = []
+    for agent_id, ev_list in sorted(
+        by_agent.items(), key=lambda kv: len(kv[1]), reverse=True
+    ):
+        type_counts: Dict[str, int] = defaultdict(int)
+        for ev in ev_list:
+            type_counts[ev.get("event_type") or "event"] += 1
+        breakdown = ", ".join(
+            f"{c}× <code>{t}</code>" for t, c in _sort_by_count(type_counts)
+        )
+        bullets.append(
+            f"<code>{agent_id}</code> — <b>{len(ev_list)} events</b> "
+            f"({breakdown})"
+        )
+    return headline, bullets
+
+
+def _summarize_plans(plans: List[Dict[str, Any]]) -> Summary:
+    if not plans:
+        return ("No plans recorded for this task.", [])
+
+    by_agent: Dict[str, Dict[str, int]] = defaultdict(
+        lambda: {"plans": 0, "intended": 0, "actual": 0, "deviations": 0}
+    )
+    for p in plans:
+        a = p.get("agent_id") or "unknown"
+        by_agent[a]["plans"] += 1
+        by_agent[a]["intended"] += len(p.get("intended_actions") or [])
+        by_agent[a]["actual"] += len(p.get("actual_actions") or [])
+        by_agent[a]["deviations"] += len(p.get("deviations") or [])
+
+    total_dev = sum(v["deviations"] for v in by_agent.values())
+    if total_dev == 0:
+        headline = (
+            f"<b>{len(plans)} plan(s)</b> across "
+            f"<b>{len(by_agent)} agent(s)</b> — every agent followed its plan exactly."
+        )
+    else:
+        deviating = ", ".join(
+            f"<code>{a}</code> ({v['deviations']})"
+            for a, v in by_agent.items() if v["deviations"]
+        )
+        headline = (
+            f"<b>{len(plans)} plan(s)</b> across <b>{len(by_agent)} agent(s)</b>, "
+            f"with <b>{total_dev} deviation(s)</b> from {deviating}."
+        )
+
+    bullets = []
+    for agent_id, v in sorted(
+        by_agent.items(), key=lambda kv: kv[1]["deviations"], reverse=True
+    ):
+        line = (
+            f"<code>{agent_id}</code> — planned <b>{v['intended']}</b>, "
+            f"executed <b>{v['actual']}</b>"
+        )
+        if v["deviations"]:
+            line += (
+                f", <b style='color:#E63946;'>{v['deviations']} deviation(s)</b>"
+            )
+        else:
+            line += " (no deviations)"
+        bullets.append(line)
+    return headline, bullets
+
+
+def _summarize_tools(tool_calls: List[Dict[str, Any]]) -> Summary:
+    if not tool_calls:
+        return ("No tool calls recorded for this task.", [])
+
+    by_tool: Dict[str, int] = defaultdict(int)
+    impact_by_tool: Dict[str, float] = defaultdict(float)
+    for c in tool_calls:
+        name = c.get("tool_name") or "?"
+        by_tool[name] += 1
+        impact_by_tool[name] = max(
+            impact_by_tool[name], float(c.get("downstream_impact_score") or 0)
+        )
+    total_ms = sum(float(c.get("duration_ms") or 0) for c in tool_calls)
+
+    ranked = sorted(
+        tool_calls,
+        key=lambda c: float(c.get("downstream_impact_score") or 0),
+        reverse=True,
+    )
+    top = ranked[0]
+    top_name = top.get("tool_name") or "?"
+    top_score = float(top.get("downstream_impact_score") or 0)
+    top_caller = top.get("called_by") or "?"
+
+    headline = (
+        f"<b>{len(tool_calls)} tool call(s)</b> across "
+        f"<b>{len(by_tool)} distinct tool(s)</b> "
+        f"(<b>{total_ms:.0f}ms</b> wall time). "
+        f"Highest impact: <code>{top_name}</code> via <code>{top_caller}</code> "
+        f"at <b>{top_score:.2f}</b>."
+    )
+
+    bullets = []
+    for c in ranked[: min(3, len(ranked))]:
+        name = c.get("tool_name") or "?"
+        caller = c.get("called_by") or "?"
+        score = float(c.get("downstream_impact_score") or 0)
+        dur = float(c.get("duration_ms") or 0)
+        bullets.append(
+            f"<code>{name}</code> via <code>{caller}</code> — "
+            f"impact <b>{score:.2f}</b>, {dur:.0f}ms"
+        )
+    if len(ranked) > 3:
+        bullets.append(
+            f"<i>+ {len(ranked) - 3} more call(s) below this in impact ranking.</i>"
+        )
+    return headline, bullets
+
+
+def _summarize_memory(memory_diffs: List[Dict[str, Any]]) -> Summary:
+    if not memory_diffs:
+        return ("No memory activity recorded for this task.", [])
+    writes = [
+        m for m in memory_diffs
+        if (m.get("operation") or "").lower() == "write"
+    ]
+    if not writes:
+        return (
+            f"<b>{len(memory_diffs)} memory event(s)</b> recorded, "
+            "but no writes — memory was read-only on this case.",
+            [],
+        )
+
+    by_key: Dict[str, int] = defaultdict(int)
+    by_agent: Dict[str, int] = defaultdict(int)
+    key_to_agents: Dict[str, set] = defaultdict(set)
+    for m in writes:
+        k = m.get("key") or "?"
+        a = m.get("agent_id") or "unknown"
+        by_key[k] += 1
+        by_agent[a] += 1
+        key_to_agents[k].add(a)
+
+    top_key, top_count = max(by_key.items(), key=lambda kv: kv[1])
+    headline = (
+        f"<b>{len(writes)} write(s)</b> across <b>{len(by_agent)} agent(s)</b> "
+        f"into <b>{len(by_key)} key(s)</b>. "
+        f"Most-touched: <code>{top_key}</code> ({top_count} writes)."
+    )
+
+    bullets = []
+    for k, n in _sort_by_count(by_key)[:4]:
+        who = ", ".join(f"<code>{a}</code>" for a in sorted(key_to_agents[k]))
+        bullets.append(f"<code>{k}</code> — <b>{n} write(s)</b> by {who}")
+    if len(by_key) > 4:
+        bullets.append(f"<i>+ {len(by_key) - 4} more key(s).</i>")
+    return headline, bullets
+
+
+def _summarize_messages(messages: List[Dict[str, Any]]) -> Summary:
+    if not messages:
+        return ("No inter-agent messages recorded for this task.", [])
+
+    n = len(messages)
+    acted = sum(1 for m in messages if m.get("acted_upon"))
+    parties = (
+        {m.get("sender") or "unknown" for m in messages}
+        | {m.get("receiver") or "unknown" for m in messages}
+    )
+
+    pair_counts: Dict[Tuple[str, str], Dict[str, int]] = defaultdict(
+        lambda: {"total": 0, "acted": 0}
+    )
+    for m in messages:
+        key = (m.get("sender") or "unknown", m.get("receiver") or "unknown")
+        pair_counts[key]["total"] += 1
+        if m.get("acted_upon"):
+            pair_counts[key]["acted"] += 1
+
+    pct = (acted / n * 100) if n else 0
+    headline = (
+        f"<b>{n} message(s)</b> between <b>{len(parties)} agent(s)</b> — "
+        f"<b style='color:#06A77D;'>{acted} acted upon</b>, "
+        f"<b style='color:#6b7280;'>{n - acted} ignored</b> "
+        f"(<b>{pct:.0f}%</b> effective)."
+    )
+
+    bullets = []
+    sorted_pairs = sorted(
+        pair_counts.items(), key=lambda kv: kv[1]["total"], reverse=True
+    )
+    for (s, r), counts in sorted_pairs[:4]:
+        bullets.append(
+            f"<code>{s}</code> → <code>{r}</code> — "
+            f"<b>{counts['total']} msg(s)</b>, "
+            f"<b style='color:#06A77D;'>{counts['acted']}</b> acted upon"
+        )
+    if len(sorted_pairs) > 4:
+        bullets.append(f"<i>+ {len(sorted_pairs) - 4} more channel(s).</i>")
+    return headline, bullets
+
+
+def _summarize_causality(
+    causal_graph: Dict[str, Any], report: Optional[Dict[str, Any]]
+) -> Summary:
+    nodes = (causal_graph or {}).get("nodes") or []
+    edges = (causal_graph or {}).get("edges") or []
+    if not nodes and not edges:
+        return ("No causal graph recorded for this task.", [])
+
+    node_set = set(nodes)
+    for e in edges:
+        for nid in (e.get("cause_event_id"), e.get("effect_event_id")):
+            if nid:
+                node_set.add(nid)
+
+    type_counts: Dict[str, int] = defaultdict(int)
+    type_strength: Dict[str, float] = defaultdict(float)
+    for e in edges:
+        t = e.get("causal_type") or "?"
+        type_counts[t] += 1
+        type_strength[t] += float(e.get("causal_strength") or 0)
+
+    head_parts = [
+        f"<b>{len(node_set)} node(s)</b>, <b>{len(edges)} edge(s)</b>."
+    ]
+    if edges:
+        strongest = max(
+            edges, key=lambda e: float(e.get("causal_strength") or 0)
+        )
+        head_parts.append(
+            f"Strongest link: <code>{strongest.get('causal_type', '?')}</code> "
+            f"at <b>{float(strongest.get('causal_strength') or 0):.2f}</b>."
+        )
+    root = ((report or {}).get("root_cause_event_id") or "").strip()
+    if root:
+        head_parts.append(
+            f"Root cause: <code>{root[:8]}</code> (highlighted in red)."
+        )
+    headline = " ".join(head_parts)
+
+    bullets = []
+    for t, c in _sort_by_count(type_counts):
+        avg = (type_strength[t] / c) if c else 0
+        bullets.append(
+            f"<code>{t}</code> — <b>{c} edge(s)</b>, mean strength <b>{avg:.2f}</b>"
+        )
+    return headline, bullets
+
+
+def _summarize_accountability(report: Optional[Dict[str, Any]]) -> Summary:
+    if not report:
+        return ("No accountability report recorded for this task.", [])
+    correct = report.get("outcome_correct")
+    badge = (
+        "<b style='color:#06A77D;'>✅ correct</b>" if correct
+        else (
+            "<b style='color:#E63946;'>❌ incorrect</b>"
+            if correct is False else "—"
+        )
+    )
+    explanation = report.get("one_line_explanation") or ""
+    explanation_html = (
+        f" <i>{explanation}</i>" if explanation else ""
+    )
+    headline = f"Outcome: {badge}.{explanation_html}"
+
+    bullets = []
+    scores = report.get("agent_responsibility_scores") or {}
+    if scores:
+        for agent_id, score in sorted(
+            scores.items(), key=lambda kv: float(kv[1]), reverse=True
+        ):
+            bullets.append(
+                f"<code>{agent_id}</code> — responsibility <b>{float(score):.2f}</b>"
+            )
+    chain = report.get("causal_chain") or []
+    if chain:
+        bullets.append(
+            f"Causal chain length: <b>{len(chain)}</b> events linking inputs to outcome."
+        )
+    return headline, bullets
+
+
+def render_tab_summary(
+    tab_name: str, summary: Summary
+) -> None:
+    """Per-task summary banner shown at the top of each pillar tab."""
+    headline, bullets = summary
+    if not headline and not bullets:
+        return
+    bullets_html = ""
+    if bullets:
+        items = "".join(f"<li>{b}</li>" for b in bullets)
+        bullets_html = f"<ul>{items}</ul>"
+    st.markdown(
+        f"""
+        <div class="xai-summary">
+          <div class="xai-summary-eyebrow">{tab_name} · this case</div>
+          <div class="xai-summary-headline">{headline}</div>
+          {bullets_html}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Per-case overview (the "large summary" landing page for each task)
+# ---------------------------------------------------------------------------
+
+def _truncate_case(text: str, limit: int = 700) -> Tuple[str, bool]:
+    text = (text or "").strip()
+    if len(text) <= limit:
+        return text, False
+    cut = text.rfind(". ", 0, limit)
+    if cut < int(limit * 0.6):
+        cut = limit
+    return text[: cut + 1].rstrip() + " …", True
+
+
+def _stat_card(label: str, value: str, sub: str = "") -> str:
+    sub_html = f'<div class="xai-stat-sub">{sub}</div>' if sub else ""
+    return (
+        '<div class="xai-stat">'
+        f'<div class="xai-stat-label">{label}</div>'
+        f'<div class="xai-stat-value">{value}</div>'
+        f'{sub_html}'
+        '</div>'
+    )
+
+
+def _section(title: str) -> None:
+    st.markdown(
+        f'<div class="xai-section">{title}</div>', unsafe_allow_html=True
+    )
+
+
+def _info_card(eyebrow: str, title: str, sub: str = "", variant: str = "accent") -> str:
+    sub_html = f'<div class="xai-card-sub">{sub}</div>' if sub else ""
+    return (
+        f'<div class="xai-card is-{variant}">'
+        f'<div class="xai-card-eyebrow">{eyebrow}</div>'
+        f'<div class="xai-card-title">{title}</div>'
+        f'{sub_html}'
+        '</div>'
+    )
+
+
+def render_case_overview(record: Dict[str, Any]) -> None:
+    """Large per-case summary — the landing page for the selected task."""
+    task_id = record.get("task_id", "—")
+    system_output = record.get("system_output") or {}
+    ground_truth = record.get("ground_truth") or {}
+    input_data = record.get("input") or {}
+    xai = record.get("xai_data") or {}
+    report = xai.get("accountability_report") or {}
+
+    final_diagnosis = system_output.get("final_diagnosis") or "—"
+    correct_answer = ground_truth.get("correct_answer") or "—"
+    correct = system_output.get("correct")
+    if correct is None:
+        correct = report.get("outcome_correct")
+    confidence = system_output.get("confidence")
+    explanation = report.get("one_line_explanation") or "—"
+    conf_str = (
+        f"{float(confidence):.2f}"
+        if isinstance(confidence, (int, float)) else "—"
+    )
+    correct_pill = (
+        '<span class="xai-pill xai-pill-success">✓ <b>Correct</b></span>'
+        if correct
+        else (
+            '<span class="xai-pill xai-pill-error">✗ <b>Incorrect</b></span>'
+            if correct is False else
+            '<span class="xai-pill"><b>—</b></span>'
+        )
+    )
+
+    # --- Hero --------------------------------------------------------------
+    st.markdown(
+        f"""
+        <div class="xai-hero">
+          <div class="xai-hero-eyebrow">Case overview · task {task_id[:12]}</div>
+          <h1 class="xai-hero-title">{final_diagnosis}</h1>
+          <div class="xai-hero-meta">
+            {correct_pill}
+            <span class="xai-pill">Ground truth: <b>&nbsp;{correct_answer}</b></span>
+            <span class="xai-pill">Confidence: <b>&nbsp;{conf_str}</b></span>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    # --- Aggregate counts (right under hero) -------------------------------
+    trajectory = xai.get("trajectory", []) or []
+    plans = xai.get("plans", []) or []
+    tool_calls = xai.get("tool_calls", []) or []
+    memory_diffs = xai.get("memory_diffs", []) or []
+    messages = xai.get("messages", []) or []
+    causal_graph = xai.get("causal_graph", {}) or {}
+    edges = causal_graph.get("edges") or []
+    writes = [
+        m for m in memory_diffs
+        if (m.get("operation") or "").lower() == "write"
+    ]
+    deviations_total = sum(len(p.get("deviations") or []) for p in plans)
+    acted_msgs = sum(1 for m in messages if m.get("acted_upon"))
+    agents_seen = (
+        {ev.get("agent_id") for ev in trajectory if ev.get("agent_id")}
+        | {p.get("agent_id") for p in plans if p.get("agent_id")}
+    )
+
+    cards = [
+        _stat_card(
+            "Events", str(len(trajectory)),
+            f"{len(agents_seen)} agents involved" if agents_seen else "",
+        ),
+        _stat_card(
+            "Plans", str(len(plans)),
+            f"{deviations_total} deviation(s)" if deviations_total else "no deviations",
+        ),
+        _stat_card("Tool calls", str(len(tool_calls)), ""),
+        _stat_card("Memory writes", str(len(writes)), ""),
+        _stat_card(
+            "Messages", str(len(messages)),
+            f"{acted_msgs} acted upon" if messages else "",
+        ),
+        _stat_card("Causal edges", str(len(edges)), ""),
+    ]
+    st.markdown(
+        '<div class="xai-stat-grid">' + "".join(cards) + '</div>',
+        unsafe_allow_html=True,
+    )
+
+    # --- Patient case + answer reasoning -----------------------------------
+    _section("The case")
+    patient_case = input_data.get("patient_case") or ""
+    options = input_data.get("answer_options") or {}
+    options = options if isinstance(options, dict) else {}
+
+    case_left, case_right = st.columns([3, 2])
+
+    with case_left:
+        st.markdown(
+            '<div class="xai-card-eyebrow">Patient case</div>',
+            unsafe_allow_html=True,
+        )
+        if patient_case.strip():
+            shown, was_truncated = _truncate_case(patient_case, limit=700)
+            st.write(shown)
+            if was_truncated:
+                with st.expander("Show full case"):
+                    st.write(patient_case)
+        else:
+            st.caption("No patient-case text recorded for this task.")
+
+        if options:
+            st.markdown(
+                '<div class="xai-card-eyebrow" style="margin-top:14px;">'
+                'Answer options</div>',
+                unsafe_allow_html=True,
+            )
+            for k, v in options.items():
+                if not v:
+                    continue
+                is_truth = (k == correct_answer)
+                marker = "🟢 " if is_truth else ""
+                st.markdown(
+                    f"- **{k}.** {marker}{v}"
+                    + ("  _← ground truth_" if is_truth else "")
+                )
+
+    with case_right:
+        variant = (
+            "success" if correct
+            else ("error" if correct is False else "accent")
+        )
+        st.markdown(
+            f"""
+            <div class="xai-conclusion is-{variant}">
+              <div class="xai-conclusion-eyebrow">System's one-line explanation</div>
+              <div class="xai-conclusion-text">{explanation}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        gt_explanation = ground_truth.get("explanation") or ""
+        if gt_explanation:
+            with st.expander("Ground-truth explanation"):
+                st.write(gt_explanation)
+
+    # --- Responsibility distribution ---------------------------------------
+    scores: Dict[str, float] = report.get("agent_responsibility_scores") or {}
+    if scores:
+        _section("Agent responsibility")
+        max_score = max(float(s) for s in scores.values()) or 1.0
+        rows = []
+        for agent_id, score in sorted(
+            scores.items(), key=lambda kv: float(kv[1]), reverse=True
+        ):
+            pct = (float(score) / max_score) * 100
+            rows.append(
+                '<div class="xai-resp-row">'
+                f'<div class="xai-resp-name">{agent_id}</div>'
+                '<div class="xai-resp-bar">'
+                f'<div class="xai-resp-bar-fill" style="width:{pct:.1f}%;"></div>'
+                '</div>'
+                f'<div class="xai-resp-val">{float(score):.2f}</div>'
+                '</div>'
+            )
+        st.markdown(
+            '<div class="xai-card">' + "".join(rows) + '</div>',
+            unsafe_allow_html=True,
+        )
+
+    # --- Key attributions (4 cards) ----------------------------------------
+    _section("Key attributions")
+    root = report.get("root_cause_event_id") or ""
+    impactful_tool_id = report.get("most_impactful_tool_call_id") or ""
+    influential_msg_id = report.get("most_influential_message_id") or ""
+    ev_map = {e.get("event_id"): e for e in trajectory}
+
+    # Top agent card. When responsibilities are tied or near-tied (within
+    # 0.05), credit the whole tied group rather than arbitrarily naming
+    # one — otherwise the headline misrepresents the actual attribution.
+    if scores:
+        sorted_scores = sorted(
+            scores.items(), key=lambda kv: float(kv[1]), reverse=True
+        )
+        top_score = float(sorted_scores[0][1])
+        tied_agents = [
+            a for a, s in sorted_scores
+            if top_score - float(s) < 0.05
+        ]
+        if len(tied_agents) > 1 and len(tied_agents) == len(sorted_scores):
+            # Full tie across every recorded specialist.
+            label = " = ".join(tied_agents) + f" · {top_score:.2f} each"
+            sub = (
+                f"All {len(tied_agents)} specialists contributed equally — "
+                "perturbing any one of them produced an identical "
+                "counterfactual outcome change."
+            )
+        elif len(tied_agents) > 1:
+            label = " = ".join(tied_agents) + f" · {top_score:.2f}"
+            sub = (
+                f"{len(tied_agents)} agents tied for highest responsibility "
+                "(within 0.05). Lower-ranked: "
+                + ", ".join(
+                    f"{a} ({float(s):.2f})"
+                    for a, s in sorted_scores[len(tied_agents):]
+                )
+            )
+        else:
+            top_agent = sorted_scores[0][0]
+            label = f"{top_agent} · {top_score:.2f}"
+            sub = "Highest counterfactual responsibility for the final outcome."
+        agent_card = _info_card(
+            "Top responsible agent", label, sub, variant="accent",
+        )
+    else:
+        agent_card = _info_card(
+            "Top responsible agent", "Not recorded", "", variant="accent"
+        )
+
+    # Root cause card
+    if root:
+        ev = ev_map.get(root)
+        if ev:
+            sub = (
+                f"{ev.get('event_type', '?')} from {ev.get('agent_id', '?')}"
+                + (f" — {ev['action']}" if ev.get("action") else "")
+            )
+            root_card = _info_card(
+                "Root-cause event", root[:8], sub, variant="error"
+            )
+        else:
+            root_card = _info_card(
+                "Root-cause event", root[:8], "", variant="error"
+            )
+    else:
+        root_card = _info_card(
+            "Root-cause event", "Not recorded", "", variant="accent"
+        )
+
+    # Top tool card. Distinguish three cases:
+    #   1. No tool calls at all → "Not recorded".
+    #   2. Tool surfaced AND its impact is > 0 → green-bordered, real metric.
+    #   3. Tool surfaced BUT every tool's measured impact was 0 → still show
+    #      the representative tool, but flag the no-measurable-impact reality
+    #      so the user understands what 0.00 means.
+    if impactful_tool_id:
+        tool = next(
+            (t for t in tool_calls if t.get("tool_call_id") == impactful_tool_id),
+            None,
+        )
+        if tool:
+            impact = float(tool.get("downstream_impact_score") or 0)
+            if impact > 0:
+                tool_card = _info_card(
+                    "Most-impactful tool call",
+                    tool.get("tool_name", "?"),
+                    (
+                        f"Called by {tool.get('called_by', '?')} · "
+                        f"impact {impact:.2f}"
+                    ),
+                    variant="success",
+                )
+            else:
+                tool_card = _info_card(
+                    "Most-impactful tool call",
+                    f"{tool.get('tool_name', '?')} · impact 0.00",
+                    (
+                        f"No measurable counterfactual impact — patching any "
+                        f"single tool's output didn't change the diagnosis. "
+                        f"The LLM-driven specialists were robust to single-tool "
+                        f"ablation; impact is concentrated at the agent-memory "
+                        f"level (see agent responsibility above)."
+                    ),
+                    variant="accent",
+                )
+        else:
+            tool_card = _info_card(
+                "Most-impactful tool call", impactful_tool_id[:8], "", variant="accent"
+            )
+    else:
+        tool_card = _info_card(
+            "Most-impactful tool call", "No tool calls recorded", "", variant="accent"
+        )
+
+    # Top message card. Three honest cases for the sub-text:
+    #   1. behavior_change_description recorded → use it verbatim.
+    #   2. acted_upon flag set → "Acted upon by receiver."
+    #   3. neither → "Highest-weighted message; no measurable behavior change."
+    # The previous fallback always said "Acted upon by receiver" which
+    # contradicted the messages-stat strip when acted_upon was actually False.
+    if influential_msg_id:
+        msg = next(
+            (m for m in messages if m.get("message_id") == influential_msg_id),
+            None,
+        )
+        if msg:
+            description = msg.get("behavior_change_description") or ""
+            acted = bool(msg.get("acted_upon"))
+            if description:
+                sub = description
+            elif acted:
+                sub = "Acted upon by receiver."
+            else:
+                sub = (
+                    "Highest-weighted message by counterfactual delta — "
+                    "no measurable behavior change recorded."
+                )
+            msg_card = _info_card(
+                "Most-influential message",
+                f"{msg.get('sender', '?')} → {msg.get('receiver', '?')}",
+                sub,
+                variant="accent",
+            )
+        else:
+            msg_card = _info_card(
+                "Most-influential message", influential_msg_id[:8], "", variant="accent"
+            )
+    else:
+        msg_card = _info_card(
+            "Most-influential message", "Not recorded", "", variant="accent"
+        )
+
+    c1, c2 = st.columns(2)
+    c1.markdown(agent_card, unsafe_allow_html=True)
+    c2.markdown(root_card, unsafe_allow_html=True)
+    c3, c4 = st.columns(2)
+    c3.markdown(tool_card, unsafe_allow_html=True)
+    c4.markdown(msg_card, unsafe_allow_html=True)
+
+    if report.get("plan_deviation_summary"):
+        _section("Plan deviation summary")
+        st.write(report["plan_deviation_summary"])
+
+    # --- CTA ----------------------------------------------------------------
+    st.markdown("<div style='margin-top:26px;'></div>", unsafe_allow_html=True)
+    cta_l, cta_c, cta_r = st.columns([1, 1.4, 1])
+    with cta_c:
+        if st.button(
+            "Continue to the 7 pillar views  →",
+            type="primary",
+            use_container_width=True,
+        ):
+            st.session_state["view"] = "explore"
+            st.rerun()
+
+
+def render_case_strip(record: Dict[str, Any]) -> None:
+    """Slim case context strip shown at the top of every pillar tab."""
+    task_id = record.get("task_id", "—")
+    system_output = record.get("system_output") or {}
+    ground_truth = record.get("ground_truth") or {}
+    final_diagnosis = system_output.get("final_diagnosis") or "—"
+    correct_answer = ground_truth.get("correct_answer") or "—"
+    correct = system_output.get("correct")
+    confidence = system_output.get("confidence")
+    conf_str = (
+        f"{float(confidence):.2f}"
+        if isinstance(confidence, (int, float)) else "—"
+    )
+    if correct:
+        badge = '<span class="xai-strip-badge is-success">✓ Correct</span>'
+    elif correct is False:
+        badge = '<span class="xai-strip-badge is-error">✗ Incorrect</span>'
+    else:
+        badge = '<span class="xai-strip-badge is-neutral">—</span>'
+
+    # Truncate long diagnoses to keep the strip on one line
+    dx_short = (
+        final_diagnosis if len(final_diagnosis) <= 70
+        else final_diagnosis[:67] + "…"
+    )
+
+    st.markdown(
+        f"""
+        <div class="xai-strip">
+          <div class="xai-strip-left">
+            <span class="xai-strip-id">task {task_id[:8]}</span>
+            <span class="xai-strip-dx">{dx_short}</span>
+            <span class="xai-strip-meta">vs. truth <b>{correct_answer}</b></span>
+            <span class="xai-strip-meta">confidence <b>{conf_str}</b></span>
+          </div>
+          <div>{badge}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
 
 # ---------------------------------------------------------------------------
 # HTTP helpers
@@ -61,6 +1133,31 @@ def api_post(path: str, payload: Dict[str, Any]) -> Any:
     return r.json()
 
 
+# Cached read wrappers. Streamlit re-runs the whole script on every UI
+# interaction; without these, every click re-fetches the full XAI payload.
+#
+#   - cached_task_record: per-task records are immutable once stored, so we
+#     cache them indefinitely keyed by task_id. ~zero cost on subsequent
+#     interactions (expanders, tab switches) within the same task.
+#   - cached_task_list: changes when a new task is run. Short 30s TTL plus
+#     an explicit clear() on Refresh and after a successful run.
+
+@st.cache_data(ttl=None, show_spinner=False)
+def cached_task_record(task_id: str) -> Dict[str, Any]:
+    return api_get(f"/tasks/{task_id}")
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def cached_task_list(per_page: int = 200) -> Dict[str, Any]:
+    return api_get("/tasks", per_page=per_page)
+
+
+def invalidate_task_caches() -> None:
+    """Bust the cached reads — call after Refresh / new-task submit."""
+    cached_task_list.clear()
+    cached_task_record.clear()
+
+
 # ---------------------------------------------------------------------------
 # Sidebar — task selector + "Run new task"
 # ---------------------------------------------------------------------------
@@ -69,9 +1166,31 @@ def render_sidebar() -> Optional[str]:
     st.sidebar.title("AgentXAI")
     st.sidebar.caption(f"API: `{API_BASE}`")
 
-    # Task list
+    # View toggle — per-case overview vs. detailed pillar tabs.
+    current_view = st.session_state.get("view", "landing")
+    nav_a, nav_b = st.sidebar.columns(2)
+    if nav_a.button(
+        "📋 Summary",
+        use_container_width=True,
+        type=("primary" if current_view == "landing" else "secondary"),
+        help="Per-case overview: what happened on this task.",
+    ):
+        st.session_state["view"] = "landing"
+        st.rerun()
+    if nav_b.button(
+        "🔬 Pillars",
+        use_container_width=True,
+        type=("primary" if current_view == "explore" else "secondary"),
+        help="The 7 detailed pillar views for this task.",
+    ):
+        st.session_state["view"] = "explore"
+        st.rerun()
+
+    st.sidebar.divider()
+
+    # Task list (cached, short TTL — see cached_task_list)
     try:
-        data = api_get("/tasks", per_page=200)
+        data = cached_task_list(200)
         items: List[Dict[str, Any]] = data.get("items", [])
     except Exception as e:
         st.sidebar.error(f"Could not fetch /tasks: {e}")
@@ -95,6 +1214,7 @@ def render_sidebar() -> Optional[str]:
     selected_task_id = by_label.get(selected_label) if selected_label else None
 
     if st.sidebar.button("↻ Refresh", use_container_width=True):
+        invalidate_task_caches()
         st.rerun()
 
     st.sidebar.divider()
@@ -102,16 +1222,16 @@ def render_sidebar() -> Optional[str]:
     # Run new task
     with st.sidebar.expander("▶ Run new task", expanded=not items):
         st.caption(
-            "Paste a MedQA record as JSON. Shape: "
-            "`{input: {...}, ground_truth: {...}}`."
+            "Paste a MedQA record as JSON. Flat MedQA shape: "
+            "`question` (the patient case), `options` (A–E), `answer_idx` "
+            "(letter)."
         )
         default_record = json.dumps(
             {
-                "input": {
-                    "patient_case": "",
-                    "answer_options": {"A": "", "B": "", "C": "", "D": "", "E": ""},
-                },
-                "ground_truth": {"correct_answer": "A", "explanation": ""},
+                "question": "",
+                "options": {"A": "", "B": "", "C": "", "D": "", "E": ""},
+                "answer_idx": "A",
+                "meta_info": "step1",
             },
             indent=2,
         )
@@ -138,6 +1258,7 @@ def render_sidebar() -> Optional[str]:
             new_id = resp.get("task_id", "?")
             st.success(f"Task {new_id[:8]} queued")
             st.session_state["preferred_task_id"] = new_id
+            invalidate_task_caches()
             st.rerun()
 
     # Honor a newly-run task on next render.
@@ -145,31 +1266,6 @@ def render_sidebar() -> Optional[str]:
     if preferred and preferred in {it["task_id"] for it in items}:
         return preferred
     return selected_task_id
-
-
-# ---------------------------------------------------------------------------
-# Header strip
-# ---------------------------------------------------------------------------
-
-def render_header(record: Dict[str, Any]) -> None:
-    task_id = record.get("task_id", "—")
-    system_output = record.get("system_output") or {}
-    ground_truth = record.get("ground_truth") or {}
-
-    final_diagnosis = system_output.get("final_diagnosis") or "—"
-    correct_answer = ground_truth.get("correct_answer") or "—"
-    confidence = system_output.get("confidence")
-    correct = system_output.get("correct")
-    badge = "✅" if correct else ("❌" if correct is False else "·")
-
-    conf_str = f"{float(confidence):.2f}" if isinstance(confidence, (int, float)) else "—"
-
-    c1, c2, c3, c4, c5 = st.columns([2, 3, 2, 1, 1])
-    c1.metric("task_id", task_id[:8])
-    c2.metric("Final diagnosis", final_diagnosis)
-    c3.metric("Ground truth", correct_answer)
-    c4.metric("Result", badge)
-    c5.metric("Confidence", conf_str)
 
 
 # ---------------------------------------------------------------------------
@@ -200,6 +1296,7 @@ def _state_diff(before: Dict[str, Any], after: Dict[str, Any]) -> str:
 
 
 def render_trajectory_tab(trajectory: List[Dict[str, Any]]) -> None:
+    render_tab_summary("Trajectory", _summarize_trajectory(trajectory))
     if not trajectory:
         st.info("No trajectory events recorded for this task.")
         return
@@ -300,6 +1397,7 @@ def _render_plan_column(
 
 
 def render_plans_tab(plans: List[Dict[str, Any]]) -> None:
+    render_tab_summary("Plans", _summarize_plans(plans))
     if not plans:
         st.info("No plans recorded for this task.")
         return
@@ -354,6 +1452,7 @@ def _truncate(value: Any, limit: int = 80) -> str:
 
 
 def render_tool_provenance_tab(tool_calls: List[Dict[str, Any]]) -> None:
+    render_tab_summary("Tool Provenance", _summarize_tools(tool_calls))
     if not tool_calls:
         st.info("No tool calls recorded for this task.")
         return
@@ -427,7 +1526,7 @@ def render_tool_provenance_tab(tool_calls: List[Dict[str, Any]]) -> None:
         st.info("No counterfactual run is linked to this tool call.")
         return
     try:
-        cf_record = api_get(f"/tasks/{cf_id}")
+        cf_record = cached_task_record(cf_id)
     except Exception as e:
         st.warning(f"Could not fetch counterfactual task `{cf_id[:8]}`: {e}")
         return
@@ -460,6 +1559,7 @@ def render_memory_tab(
     memory_diffs: List[Dict[str, Any]],
     trajectory: List[Dict[str, Any]],
 ) -> None:
+    render_tab_summary("Memory", _summarize_memory(memory_diffs))
     if not memory_diffs:
         st.info("No memory writes recorded for this task.")
         return
@@ -557,6 +1657,7 @@ def _import_pyvis() -> Any:
 # ---------------------------------------------------------------------------
 
 def render_communication_tab(messages: List[Dict[str, Any]]) -> None:
+    render_tab_summary("Communication", _summarize_messages(messages))
     if not messages:
         st.info("No inter-agent messages recorded for this task.")
         return
@@ -683,6 +1784,7 @@ def render_causality_tab(
     trajectory: List[Dict[str, Any]],
     report: Optional[Dict[str, Any]],
 ) -> None:
+    render_tab_summary("Causality", _summarize_causality(causal_graph, report))
     nodes: List[str] = (causal_graph or {}).get("nodes") or []
     edges: List[Dict[str, Any]] = (causal_graph or {}).get("edges") or []
     if not nodes and not edges:
@@ -833,6 +1935,7 @@ def render_accountability_tab(
     trajectory: List[Dict[str, Any]],
     tool_calls: List[Dict[str, Any]],
 ) -> None:
+    render_tab_summary("Accountability", _summarize_accountability(report))
     if not report:
         st.info("No accountability report recorded for this task.")
         return
@@ -947,21 +2050,48 @@ def render_accountability_tab(
 
 def main() -> None:
     st.set_page_config(page_title="AgentXAI", layout="wide")
+    inject_css()
+
+    # Default view — per-case summary lands first; user clicks through to
+    # the 7 pillar tabs for that same task.
+    if "view" not in st.session_state:
+        st.session_state["view"] = "landing"
 
     task_id = render_sidebar()
+
     if not task_id:
-        st.title("AgentXAI")
-        st.info("Select a task from the sidebar, or run a new one.")
+        st.markdown(
+            """
+            <div class="xai-hero">
+              <div class="xai-hero-eyebrow">AgentXAI · Multi-agent explainability</div>
+              <h1 class="xai-hero-title">Pick a task to see its full XAI trace.</h1>
+              <div class="xai-hero-meta">
+                <span class="xai-pill">Each task lands on a per-case summary</span>
+                <span class="xai-pill">Then drill into the 7 pillar views</span>
+              </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        st.info(
+            "Use the **Task** dropdown in the sidebar to select an existing run, "
+            "or expand **▶ Run new task** to submit a new MedQA record."
+        )
         return
 
     try:
-        record = api_get(f"/tasks/{task_id}")
+        record = cached_task_record(task_id)
     except Exception as e:
         st.error(f"Could not fetch /tasks/{task_id}: {e}")
         return
 
-    render_header(record)
-    st.divider()
+    if st.session_state["view"] == "landing":
+        render_case_overview(record)
+        return
+
+    # Pillar view — slim case strip up top so the user always knows which
+    # case they're looking at.
+    render_case_strip(record)
 
     xai = record.get("xai_data") or {}
     trajectory = xai.get("trajectory", []) or []
