@@ -5,9 +5,18 @@ Pipeline (one ``active_plan``):
 
 1. ``extract_candidate_conditions`` — LLM produces a short list of plausible
                                        conditions to look up
-2. ``pubmed_search``                — top-k textbook passages for the case
-                                       (pubmed_search uses the textbook FAISS
-                                       index as a substitute corpus)
+2. ``pubmed_search``                — top-k passages for the case.
+                                       IMPORTANT: this action name and the
+                                       tool it calls are both ``pubmed_search``
+                                       for historical / backward-compat reasons,
+                                       but the underlying implementation is a
+                                       LOCAL FAISS search over 18 medical
+                                       textbooks — not the PubMed API. The
+                                       dashboard surfaces this honestly via a
+                                       display alias. See
+                                       ``agentxai/tools/pubmed_search.py``
+                                       for the full rationale and how to swap
+                                       in a real PubMed backend later.
 3. ``guideline_lookup``             — fuzzy guideline match per candidate
 4. ``summarize_findings``           — write four memory keys + send a
                                        ``finding`` message to the Orchestrator
@@ -135,25 +144,28 @@ class SpecialistB(TracedAgent):
                 "guideline_matches":    guideline_matches,
                 "retrieval_confidence": round(retrieval_conf, 4),
             }
-            for k, v in findings.items():
-                self.memory[k] = v
-
-            # The orchestrator only needs a slim summary, not the full doc bodies.
-            self.send_message(
-                receiver=self.orchestrator_id,
-                message_type="finding",
-                content={
-                    "n_docs":               len(retrieved_docs),
-                    "top_evidence":         top_evidence,
-                    "guideline_matches":    guideline_matches,
-                    "retrieval_confidence": findings["retrieval_confidence"],
-                },
-            )
-            self.log_action(
+            # Wrap memory writes + message in `traced_action` so each diff
+            # links to the summarize_findings event (otherwise the writes
+            # fire with no event in context and land "outside_traced_action").
+            with self.traced_action(
                 "summarize_findings",
                 {"keys": list(findings.keys())},
                 outcome="memory+message written",
-            )
+            ):
+                for k, v in findings.items():
+                    self.memory[k] = v
+
+                # The orchestrator only needs a slim summary, not the full doc bodies.
+                self.send_message(
+                    receiver=self.orchestrator_id,
+                    message_type="finding",
+                    content={
+                        "n_docs":               len(retrieved_docs),
+                        "top_evidence":         top_evidence,
+                        "guideline_matches":    guideline_matches,
+                        "retrieval_confidence": findings["retrieval_confidence"],
+                    },
+                )
 
         return findings
 

@@ -14,12 +14,13 @@ AgentXAI/
 │   │   ├── base.py              ← TracedAgent base class, make_default_llm()
 │   │   ├── orchestrator.py      ← Orchestrator  (routes, coordinates)
 │   │   ├── specialist_a.py      ← SpecialistA   (symptom + severity)
-│   │   ├── specialist_b.py      ← SpecialistB   (PubMed + guidelines)
+│   │   ├── specialist_b.py      ← SpecialistB   (textbook search + guidelines — see §"Tool naming")
 │   │   └── synthesizer.py       ← Synthesizer   (final diagnosis)
 │   ├── tools/
 │   │   ├── symptom_lookup.py    ← @traced_tool, queries FAISS index
 │   │   ├── severity_scorer.py   ← @traced_tool, LLM-rated 0–1 score
 │   │   ├── pubmed_search.py     ← @traced_tool, FAISS over textbook chunks
+│   │   │                          (NOT real PubMed — see §"Tool naming")
 │   │   └── guideline_lookup.py  ← @traced_tool, searches guideline stubs
 │   ├── xai/
 │   │   ├── trajectory_logger.py ← Pillar 1 — log_event(), all state transitions
@@ -135,7 +136,179 @@ All tables live in `agentxai/data/agentxai.db`. Every row has a `task_id` FK bac
 | `agent_messages` | 5 | message_id · sender · receiver · message_type · acted_upon · behavior_change_description |
 | `causal_edges` | 6 | edge_id · cause_event_id · effect_event_id · causal_strength · causal_type |
 | `accountability_reports` | 7 | one_line_explanation · agent_responsibility_scores_json · causal_chain_json · root_cause_event_id |
-| `manual_reviews` | — | task_id · plausibility · completeness · specificity · causal_coherence · notes · status |
+| `manual_reviews` (legacy) | — | task_id · plausibility · completeness · specificity · causal_coherence · notes · status — kept readable; new writes go to v2 |
+| `manual_reviews_v2` | — | review_id · medqa_task_id (UNIQUE) · pipeline_task_id (FK→tasks.task_id, nullable) · 4 ratings · notes · status · reviewed_at |
+
+---
+
+## Manual reviews — schema migration to a linked v2 table
+
+The original `manual_reviews` table was created by raw SQL inside the
+Streamlit review page with a single `task_id` column and **no foreign
+key to anything**. That column held the **MedQA stable id** (e.g.
+`A00042`) — *not* the per-pipeline-run UUID stored in `tasks.task_id`,
+so even retrofitting a naive FK would have failed: the two columns live
+in different namespaces.
+
+The migration introduces `manual_reviews_v2` as a first-class
+SQLAlchemy ORM table managed alongside the rest of the schema:
+
+| Column | Notes |
+|---|---|
+| `review_id` (PK) | Auto-increment integer. |
+| `medqa_task_id` | UNIQUE, NOT NULL. Stable MedQA id (e.g. `A00042`) — what reviewers actually rate. The deterministic 500-record split is keyed by this. |
+| `pipeline_task_id` | TEXT NULL with `FOREIGN KEY → tasks.task_id`. Soft link to the most recent pipeline run for this MedQA record. NULL when no run exists yet (review can be saved either way). |
+| `plausibility` / `completeness` / `specificity` / `causal_coherence` | INTEGER NULL — same 1-5 ratings as the legacy table. |
+| `notes` / `status` / `reviewed_at` | TEXT — same semantics as legacy. |
+
+**Backward compatibility:**
+
+* The legacy `manual_reviews` table is **left in place untouched** and
+  remains queryable directly.
+* On every `TrajectoryStore` init, `migrate_legacy_manual_reviews()`
+  copies legacy rows into v2 (idempotent — v2 wins on conflict).
+* `TrajectoryStore.list_manual_reviews(include_legacy=True)` returns a
+  unified stream of both tables, marked with `"source": "v2"` or
+  `"source": "legacy"`.
+* `eval/aggregate_manual_reviews.py` reads via the unified stream so
+  all existing reviews continue to count toward the report.
+
+**Orphan prevention:**
+
+* `TrajectoryStore.save_manual_review` validates that
+  `pipeline_task_id`, when supplied, exists in `tasks`. Bad ids raise
+  `KeyError` rather than landing as orphans.
+* The Streamlit review page validates that `medqa_task_id` is in the
+  deterministic 500-record split before writing. Typos / mis-pasted ids
+  surface as a UI error instead of a silent bad row.
+* The page also auto-populates `pipeline_task_id` with the most recent
+  pipeline run for the MedQA record (via
+  `latest_pipeline_task_id_for(medqa_task_id)`) so newly-saved reviews
+  are reliably linked.
+
+---
+
+## Tool naming — `pubmed_search` is a local FAISS textbook search
+
+The tool registered as `pubmed_search` does **not** call the PubMed/NCBI
+API. Despite the name, it runs a top-k semantic search over a local
+FAISS index built from 18 medical textbooks (Harrison, Robbins, First
+Aid, …) using `all-MiniLM-L6-v2` embeddings. See
+`agentxai/tools/pubmed_search.py` for the full implementation.
+
+**Why the name is preserved.** The identifier `pubmed_search` is a
+stable integration point referenced in three places that we don't want
+to churn just to fix a label:
+
+  1. **Stored records** — every historical `tool_use_events` row carries
+     `tool_name="pubmed_search"`. Renaming would either invalidate them
+     or require a migration.
+  2. **Specialist B's plan + log_action calls** — the action is logged
+     under `pubmed_search`, which feeds the trajectory log, the causal
+     DAG, and the accountability report.
+  3. **Tests + mocks** — `pubmed_search_fn` is the constructor parameter
+     SpecialistB exposes for dependency-injection (used by the smoke
+     test to stub out FAISS on Apple Silicon).
+
+**How the truth is surfaced.** The Streamlit dashboard maps the stored
+name to a clarified label via `_TOOL_DISPLAY_OVERRIDES` in
+`agentxai/ui/dashboard.py`:
+
+> `pubmed_search` → **pubmed_search (local textbook FAISS)**
+
+The Tool Provenance tab also renders an info caption noting the
+display-alias rule when an aliased tool appears in the task. Stored
+records, API responses, and call sites continue to use the bare name.
+
+**How to swap in real PubMed later.** Either:
+
+  * Replace the body of `pubmed_search()` in
+    `agentxai/tools/pubmed_search.py` with a real PubMed/E-utilities
+    client; the function signature `(query: str, k: int) -> List[dict]`
+    and the `{doc_id, text, score, source_file}` result shape are the
+    contract every downstream consumer expects, OR
+  * Inject a different implementation via SpecialistB's
+    `pubmed_search_fn` constructor parameter and remove
+    `pubmed_search` from `_TOOL_DISPLAY_OVERRIDES` so the alias caption
+    no longer fires.
+
+---
+
+## Scoring weights — `XAIScoringConfig`
+
+Every numeric knob the causal DAG, counterfactual engine, and
+accountability scorer use lives on a single dataclass:
+`agentxai.xai.config.XAIScoringConfig`. The defaults reproduce the
+historical (pre-config) behaviour exactly — instantiating
+`XAIScoringConfig()` and passing it to the three component constructors
+gives identical scores. Older module-level constants (`_DX_WEIGHT`,
+`_TEMPORAL_WEIGHT`, `_RESP_WEIGHTS`, `_TIE_EPSILON`, …) are kept as
+backward-compat aliases that read from the default config.
+
+| Field | Default | Used by |
+|---|---|---|
+| `cf_dx_weight` | 0.6 | `_outcome_delta` (counterfactual_engine.py) |
+| `cf_conf_weight` | 0.4 | `_outcome_delta` |
+| `temporal_edge_weight` | 0.3 | `CausalDAGBuilder._add_temporal_edges` |
+| `message_acted_upon_weight` | 1.0 | `CausalDAGBuilder._add_message_edges` (when no cf delta) |
+| `message_ignored_weight` | 0.5 | same |
+| `root_tool_bonus` | 1.5 | `_root_cause_score` (accountability.py) |
+| `root_acted_msg_bonus` | 1.0 | same |
+| `root_mem_bonus` | 0.5 | same |
+| `root_upstream_discount` | 0.3 | same — max % shaved from latest candidate |
+| `responsibility_weights` | `{counterfactual: 0.35, tool_impact: 0.20, message_efficacy: 0.15, memory_used: 0.15, usefulness: 0.10, causal_centrality: 0.05}` | `_combine_signals` |
+| `question_type_priors` | one row per type (see `agentxai/data/question_classifier.py`) | `_prior_for` |
+| `tie_epsilon` | 0.05 | `_tied_top_agents` (explanation builders) |
+
+### These weights are heuristic — please ablate
+
+These values were calibrated qualitatively against the test fixtures in
+`tests/`. There is no held-out scoring rubric, no ground-truth label set,
+and no formal calibration study. Any of the following would be a real
+research contribution:
+
+* **Counterfactual delta weights** — sweep `cf_dx_weight` ∈ [0.4, 0.8]
+  against a labelled outcome-change dataset, report the AUC delta on the
+  faithfulness metric (`eval/evaluate.py::_faithfulness`).
+* **Causal-DAG edge weights** — does the temporal-vs-message ratio
+  matter for downstream accountability scores? A sensitivity sweep would
+  surface whether the current 0.3/1.0 split is load-bearing.
+* **Responsibility-composite weights** — currently the counterfactual
+  signal carries 35%. An ablation that varied each weight in turn while
+  holding the others proportional would show which signals are doing
+  the work and which are noise.
+* **Question-type priors** — direction-only (A < B for screening / drug /
+  anatomy questions). The exact 0.5–0.8 multipliers are unstudied; a
+  per-question-type accuracy sweep against MedQA could re-tune them.
+
+To ablate any of these, build a custom config and pass it to the three
+constructors:
+
+```python
+from agentxai.xai.config import XAIScoringConfig
+from agentxai.xai.accountability import AccountabilityReportGenerator
+from agentxai.xai.causal_dag import CausalDAGBuilder
+from agentxai.xai.counterfactual_engine import CounterfactualEngine
+
+cfg = XAIScoringConfig(
+    cf_dx_weight=0.8,
+    cf_conf_weight=0.2,
+    responsibility_weights={
+        "counterfactual": 0.50,   # bump cf weight
+        "tool_impact":    0.20,
+        "message_efficacy": 0.10,
+        "memory_used":    0.10,
+        "usefulness":     0.05,
+        "causal_centrality": 0.05,
+    },
+)
+CausalDAGBuilder(store, config=cfg).build(task_id)
+CounterfactualEngine(store, pipeline, task_id, config=cfg)
+AccountabilityReportGenerator(store, pipeline=pipe, llm=llm, config=cfg)
+```
+
+Existing stored records and tests use the default config and are
+unaffected.
 
 ---
 

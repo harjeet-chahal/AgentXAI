@@ -129,6 +129,34 @@ class TestBuildCommunicationGraph:
         graph = build_communication_graph(store, TASK_ID)
         assert isinstance(graph, nx.DiGraph)
 
+    def test_returns_a_multidigraph(self, store):
+        """
+        Regression: the function used to be annotated as `-> nx.DiGraph`
+        despite returning a MultiDiGraph. The annotation is now honest.
+        Asserting the runtime type lets future readers spot if someone
+        silently downgrades the return.
+        """
+        graph = build_communication_graph(store, TASK_ID)
+        assert isinstance(graph, nx.MultiDiGraph)
+        # Sanity: MultiDiGraph IS a DiGraph too — old callers don't break.
+        assert isinstance(graph, nx.DiGraph)
+
+    def test_multidigraph_preserves_repeat_edges(self, store):
+        """Two messages between the same pair → two distinct edges."""
+        from agentxai.data.schemas import AgentMessage
+
+        store.save_message(TASK_ID, AgentMessage(
+            sender="a", receiver="b", message_type="finding",
+            content={"first": True},
+        ))
+        store.save_message(TASK_ID, AgentMessage(
+            sender="a", receiver="b", message_type="finding",
+            content={"second": True},
+        ))
+        graph = build_communication_graph(store, TASK_ID)
+        # Both edges survived — a plain DiGraph would have collapsed them.
+        assert graph.number_of_edges("a", "b") == 2
+
     def test_unknown_task_returns_empty(self, store):
         graph = build_communication_graph(store, "DOES_NOT_EXIST")
         assert graph.number_of_nodes() == 0

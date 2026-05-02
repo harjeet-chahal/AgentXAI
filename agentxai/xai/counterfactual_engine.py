@@ -21,6 +21,7 @@ from sqlalchemy import text
 
 from agentxai.data.schemas import ToolUseEvent
 from agentxai.store.trajectory_store import TrajectoryStore
+from agentxai.xai.config import DEFAULT_CONFIG, XAIScoringConfig
 
 
 # ---------------------------------------------------------------------------
@@ -84,12 +85,16 @@ class CounterfactualEngine:
         task_id: str,
         state_snapshot: Optional[Dict[str, Any]] = None,
         original_output: Optional[Dict[str, Any]] = None,
+        config: Optional[XAIScoringConfig] = None,
     ) -> None:
         self.store = store
         self.pipeline = pipeline
         self.task_id = task_id
         self.state_snapshot: Dict[str, Any] = dict(state_snapshot or {})
         self.original_output: Dict[str, Any] = dict(original_output or {})
+        # Scoring weights — defaults reproduce historical behaviour when
+        # `config` is None. See agentxai/xai/config.py for the knobs.
+        self.config: XAIScoringConfig = config or DEFAULT_CONFIG
         self._ensure_table()
 
     # ------------------------------------------------------------------
@@ -101,7 +106,7 @@ class CounterfactualEngine:
         tool = self._find_tool_call(tool_call_id)
         baseline = _neutral_baseline(tool.outputs)
         perturbed = self._resume({"tool_output": {tool_call_id: baseline}})
-        delta = _outcome_delta(self.original_output, perturbed)
+        delta = _outcome_delta(self.original_output, perturbed, self.config)
         self._log_run(
             perturbation_type="tool_output",
             target_id=tool_call_id,
@@ -115,7 +120,7 @@ class CounterfactualEngine:
         """Type 2 — neutralize a specialist's memory final state; return responsibility."""
         baseline: Dict[str, Any] = {}
         perturbed = self._resume({"agent_memory": {agent_id: baseline}})
-        delta = _outcome_delta(self.original_output, perturbed)
+        delta = _outcome_delta(self.original_output, perturbed, self.config)
         self._log_run(
             perturbation_type="agent_output",
             target_id=agent_id,
@@ -129,7 +134,7 @@ class CounterfactualEngine:
         """Type 3 — neutralize a message; return (changed_behavior, description)."""
         baseline = {"info": "no information"}
         perturbed = self._resume({"message_content": {message_id: baseline}})
-        delta = _outcome_delta(self.original_output, perturbed)
+        delta = _outcome_delta(self.original_output, perturbed, self.config)
         changed = delta > 0.0
         description = _describe_change(self.original_output, perturbed, changed)
         self._log_run(
@@ -237,11 +242,17 @@ def _neutral_baseline(value: Any) -> Any:
     return {}
 
 
-_DX_WEIGHT = 0.6
-_CONF_WEIGHT = 0.4
+# Backward-compat aliases pointing at the default config. Callers that
+# previously imported these module constants keep working unchanged.
+_DX_WEIGHT: float = DEFAULT_CONFIG.cf_dx_weight
+_CONF_WEIGHT: float = DEFAULT_CONFIG.cf_conf_weight
 
 
-def _outcome_delta(orig: Dict[str, Any], perturbed: Dict[str, Any]) -> float:
+def _outcome_delta(
+    orig: Dict[str, Any],
+    perturbed: Dict[str, Any],
+    config: Optional[XAIScoringConfig] = None,
+) -> float:
     """
     Graded counterfactual outcome delta in [0, 1].
 
@@ -249,15 +260,19 @@ def _outcome_delta(orig: Dict[str, Any], perturbed: Dict[str, Any]) -> float:
     its own — a diagnosis flip with unchanged confidence no longer maxes out
     at 1.0, leaving room for confidence shifts to differentiate.
 
-      score = 0.6 * dx_changed (binary)  +  0.4 * conf_delta (continuous)
+      score = cf_dx_weight   * dx_changed (binary)
+            + cf_conf_weight * conf_delta (continuous)
 
-    Reference points:
+    With the default weights (0.6 / 0.4):
         identical                      → 0.00
         dx unchanged, conf delta 0.50  → 0.20
         dx changed,   conf unchanged   → 0.60
         dx changed,   conf delta 0.50  → 0.80
         dx changed,   conf delta 1.00  → 1.00
+
+    Pass a custom :class:`XAIScoringConfig` to override the weights.
     """
+    cfg = config or DEFAULT_CONFIG
     orig_dx = orig.get("final_diagnosis")
     new_dx = perturbed.get("final_diagnosis")
     dx_changed = 0.0 if orig_dx == new_dx else 1.0
@@ -269,7 +284,7 @@ def _outcome_delta(orig: Dict[str, Any], perturbed: Dict[str, Any]) -> float:
     except (TypeError, ValueError):
         conf_delta = 0.0
     conf_delta = max(0.0, min(1.0, conf_delta))
-    return min(1.0, _DX_WEIGHT * dx_changed + _CONF_WEIGHT * conf_delta)
+    return min(1.0, cfg.cf_dx_weight * dx_changed + cfg.cf_conf_weight * conf_delta)
 
 
 def _describe_change(

@@ -162,6 +162,14 @@ class Pipeline:
             "explanation":    record.get("meta_info", ""),
         }
 
+        # Heuristic question-type label (no LLM call). Stored on the task
+        # input so the accountability scorer can apply per-(type, agent)
+        # priors and the dashboard can surface it. Defaults to "unknown"
+        # when nothing matches — the priors treat that as neutral, so an
+        # under-classified question costs nothing.
+        from agentxai.data.question_classifier import classify_question
+        question_type = classify_question(case, options)
+
         # 1+8. Persist the task row up-front; FK checks elsewhere need a parent row.
         task_record = AgentXAIRecord(
             task_id=task_id,
@@ -171,6 +179,7 @@ class Pipeline:
                 "options":       options,
                 "raw_task_id":   record.get("task_id", ""),
                 "meta_info":     record.get("meta_info", ""),
+                "question_type": question_type,
             },
             ground_truth=ground_truth,
             system_output={},
@@ -185,18 +194,63 @@ class Pipeline:
         result = agents["orchestrator"].run(agent_payload) or {}
         final = result.get("final_output", {}) or {}
 
-        predicted_letter, predicted_text = _match_option_letter(
-            final.get("final_diagnosis", ""), options,
-        )
+        predicted_letter, predicted_text = _resolve_predicted_letter(final, options)
         correct = bool(predicted_letter and predicted_letter == ground_truth["correct_answer"])
+
+        # Heuristic confidence breakdown — five 0-1 factors explaining
+        # what the headline confidence rests on. Computed from the live
+        # specialist memory dicts (no extra DB roundtrip). NOT a
+        # calibrated probability — see confidence_factors.py docstring.
+        from agentxai.xai.confidence_factors import compute_confidence_factors
+        from agentxai.xai.evidence_attribution import infer_supporting_evidence_ids
+
+        spec_a_mem = dict(loggers["memory_logger"].for_agent("specialist_a"))
+        spec_b_mem = dict(loggers["memory_logger"].for_agent("specialist_b"))
+
+        # Honor the Synthesizer's explicit citations when present;
+        # otherwise infer them by scanning the rationale against
+        # Specialist B's top_evidence snippets. Either way, the result
+        # flows through both system_output and the accountability report
+        # so the dashboard can mark each evidence card with a
+        # used-in-rationale badge.
+        supporting_evidence_ids: List[str] = list(
+            final.get("supporting_evidence_ids", []) or []
+        )
+        if not supporting_evidence_ids:
+            supporting_evidence_ids = infer_supporting_evidence_ids(
+                rationale=str(final.get("rationale", "") or ""),
+                top_evidence=spec_b_mem.get("top_evidence") or [],
+            )
+
+        confidence_factors = compute_confidence_factors(
+            final_output={**final,
+                          "predicted_letter": predicted_letter,
+                          "predicted_text": predicted_text,
+                          "supporting_evidence_ids": supporting_evidence_ids},
+            specialist_a_memory=spec_a_mem,
+            specialist_b_memory=spec_b_mem,
+            options=options,
+        )
+
         system_output = {
-            "final_diagnosis":  final.get("final_diagnosis", ""),
-            "confidence":       float(final.get("confidence", 0.0) or 0.0),
-            "differential":     list(final.get("differential", []) or []),
-            "rationale":        final.get("rationale", ""),
-            "predicted_letter": predicted_letter,
-            "predicted_text":   predicted_text,
-            "correct":          correct,
+            "final_diagnosis":         final.get("final_diagnosis", "") or predicted_text,
+            "confidence":              float(final.get("confidence", 0.0) or 0.0),
+            "differential":            list(final.get("differential", []) or []),
+            "rationale":               final.get("rationale", ""),
+            "predicted_letter":        predicted_letter,
+            "predicted_text":          predicted_text,
+            "correct":                 correct,
+            # New per-option reasoning surface. Both fields default to []
+            # for older Synthesizer responses that don't include them — no
+            # downstream consumer (API, dashboard, eval) is forced to handle
+            # the keys, so existing records stay readable verbatim.
+            "option_analysis":         list(final.get("option_analysis", []) or []),
+            "supporting_evidence_ids": supporting_evidence_ids,
+            # Five heuristic factors decomposing the headline confidence.
+            # See agentxai/xai/confidence_factors.py — NOT clinically
+            # calibrated. Older records load with this key absent; the
+            # dashboard renders the panel only when present.
+            "confidence_factors":      confidence_factors,
         }
         task_record.system_output = system_output
         store.save_task(task_record)
@@ -559,6 +613,44 @@ _WORD_RE = re.compile(r"[A-Za-z0-9]+")
 _LEADING_LETTER_RE = re.compile(
     r"^\s*[\(\[]?([A-Za-z])(?:[\)\].:\-\s]|$)"
 )
+
+
+def _resolve_predicted_letter(
+    synth_output: Dict[str, Any],
+    options: Dict[str, str],
+) -> Tuple[str, str]:
+    """
+    Pick the (letter, text) tuple for a Synthesizer output.
+
+    Priority:
+        1. `predicted_letter` from the Synthesizer if it names a real
+           option. The Synthesizer has the rationale context to
+           disambiguate cases where the option text is shorter / phrased
+           differently than the diagnosis (e.g., the option is "Western
+           blot" but the rationale is one paragraph mentioning many tests).
+        2. Otherwise fall back to text-matching `final_diagnosis` (or
+           `predicted_text`) against the option list via `_match_option_letter`.
+
+    `predicted_text` is taken verbatim from the Synthesizer when a letter
+    pick is honored, then defaults to the option's listed text. This
+    keeps the on-screen "model picked X" label faithful to whatever the
+    LLM emitted rather than re-deriving it from the option dict.
+    """
+    if not isinstance(synth_output, dict) or not options:
+        return "", ""
+    synth_letter = str(synth_output.get("predicted_letter", "") or "").strip().upper()
+    synth_text = str(synth_output.get("predicted_text", "") or "").strip()
+    upper_keys = {k.upper(): k for k in options.keys()}
+
+    if synth_letter and synth_letter in upper_keys:
+        actual_key = upper_keys[synth_letter]
+        return synth_letter, synth_text or options.get(actual_key, "") or ""
+
+    diagnosis_text = (
+        str(synth_output.get("final_diagnosis", "") or "")
+        or synth_text
+    )
+    return _match_option_letter(diagnosis_text, options)
 
 
 def _match_option_letter(

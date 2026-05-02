@@ -28,7 +28,7 @@ from abc import ABC, abstractmethod
 from typing import Any, Dict, Iterator, List, Optional
 
 from agentxai.data.schemas import TrajectoryEvent
-from agentxai.xai.memory_logger import MemoryLogger
+from agentxai.xai.memory_logger import MemoryLogger, current_event_id
 from agentxai.xai.message_logger import MessageLogger
 from agentxai.xai.plan_tracker import PlanTracker
 from agentxai.xai.trajectory_logger import TrajectoryLogger
@@ -113,11 +113,25 @@ class TracedAgent(ABC):
 
         While the block is open, ``log_action`` calls are auto-attributed to
         this plan. Nesting is supported — the innermost plan wins.
+
+        Also snapshots ``current_event_id`` on entry and restores it on
+        exit. Both ``log_action`` and ``traced_action`` push event_ids onto
+        that contextvar; without this snapshot they would leak past the
+        plan boundary and contaminate any later memory writes (especially
+        in shared-process test runners).
         """
         plan_id = self.emit_plan(intended_actions)
+        # `.set(.get(...))` creates a token whose `.reset(token)` restores
+        # the contextvar to its value immediately before this line — i.e.
+        # any internal `current_event_id.set(...)` calls are unwound on exit.
+        cev_token = current_event_id.set(current_event_id.get(""))
         try:
             yield plan_id
         finally:
+            try:
+                current_event_id.reset(cev_token)
+            except Exception:
+                pass
             try:
                 self.plan_tracker.finalize_plan(plan_id)
             finally:
@@ -139,12 +153,19 @@ class TracedAgent(ABC):
         outcome: str = "",
     ) -> TrajectoryEvent:
         """
-        Record one executed action.
+        Record one *already-executed* action that involved no further memory
+        writes the caller cares about linking.
 
         - If a plan is active, append ``action`` to its actual-actions list
           (``PlanTracker.record_actual_action``).
         - Always write a TrajectoryEvent (event_type=``"action"``) via the
           trajectory logger.
+        - Push this event's id onto ``current_event_id`` so any *subsequent*
+          stray memory write (e.g., a write done between this action and the
+          next) attributes to it rather than landing untraced. This is a
+          best-effort default — for action blocks that *contain* memory
+          writes, prefer ``traced_action(...)`` so the writes link to the
+          enclosing event rather than the previous one.
 
         Returns the persisted TrajectoryEvent.
         """
@@ -163,7 +184,71 @@ class TracedAgent(ABC):
             outcome=outcome,
         )
         self._last_state_snapshot = state_after
+        # Attribute any straggler writes between actions to the most-recent
+        # action — better than dropping them as "outside_traced_action".
+        current_event_id.set(event.event_id)
         return event
+
+    @contextlib.contextmanager
+    def traced_action(
+        self,
+        action: str,
+        inputs: Optional[Dict[str, Any]] = None,
+        outcome: str = "",
+    ) -> Iterator[TrajectoryEvent]:
+        """
+        Run a block of code as a single traced action with proper memory
+        attribution.
+
+        Lifecycle:
+            1. Snapshot ``state_before`` from current memory.
+            2. Persist a provisional TrajectoryEvent (state_after = state_before).
+            3. Push the event_id onto ``current_event_id`` so every memory
+               write inside the block emits a MemoryDiff linked to this event.
+            4. Yield the event.
+            5. On exit (success or exception): refresh ``state_after`` to the
+               post-block memory snapshot, re-save the event (upsert by id),
+               and reset the contextvar.
+
+        Use this for any block that performs memory writes you want linked
+        to a specific action — it replaces the older "write first, then
+        log_action" pattern that left every diff untraced.
+        """
+        plan_id = self.active_plan_id
+        if plan_id is not None:
+            self.plan_tracker.record_actual_action(plan_id, action)
+
+        state_before = self._snapshot_own_memory()
+        event = self.trajectory_logger.log_event(
+            agent_id=self.agent_id,
+            event_type="action",
+            state_before=state_before,
+            action=action,
+            action_inputs=dict(inputs or {}),
+            # Provisional state_after; refreshed on exit.
+            state_after=state_before,
+            outcome=outcome,
+        )
+
+        token = current_event_id.set(event.event_id)
+        try:
+            yield event
+        finally:
+            try:
+                current_event_id.reset(token)
+            except Exception:
+                # contextvar reset can fail across event loops; best-effort.
+                pass
+            state_after = self._snapshot_own_memory()
+            self._last_state_snapshot = state_after
+            if state_after != state_before:
+                # Upsert the event with the real post-write state. The store
+                # keys events by event_id, so this replaces the provisional
+                # row in-place rather than creating a new event.
+                event.state_after = state_after
+                self.trajectory_logger.store.save_event(
+                    self.trajectory_logger.task_id, event,
+                )
 
     def _snapshot_own_memory(self) -> Dict[str, Any]:
         """JSON-safe deep copy of the agent's current memory dict."""

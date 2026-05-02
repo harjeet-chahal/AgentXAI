@@ -109,10 +109,17 @@ class Orchestrator(TracedAgent):
 
     def collected_findings(self) -> List[Dict[str, Any]]:
         """
-        Return all ``finding`` messages addressed to this orchestrator for the
-        current task — provided as an explicit accessor so downstream code
-        (or tests) can verify the message-based collection path without
-        threading the store through.
+        Return all ``finding`` messages addressed to this orchestrator.
+
+        Not called from `run()` — the orchestrator's own diagnostic flow
+        feeds findings forward via memory + the synthesizer's read step.
+        This accessor exists so downstream callers (test fixtures, debug
+        scripts, future routing variants) can inspect the message-based
+        collection path without needing to thread the store through.
+
+        If you find yourself wondering whether to delete this: check
+        `tests/test_agents.py::test_orchestrator_routes_to_specialists_and_synthesizer`
+        — it asserts the message channel is populated correctly.
         """
         try:
             record = self.message_logger.store.get_full_record(

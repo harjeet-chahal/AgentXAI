@@ -3,11 +3,35 @@ FastAPI application entry point.
 
 Exposes endpoints for running the pipeline and querying XAI data from the
 trajectory store. Pydantic v2 response models mirror the dataclasses in
-``agentxai.data.schemas`` one-for-one. CORS is opened for the Streamlit UI.
+``agentxai.data.schemas`` one-for-one.
+
+Security posture
+----------------
+The API is designed for **local-first** use (Streamlit dashboard + the
+researcher's laptop). It supports two opt-in hardening levers via env
+vars; defaults preserve the friction-free local dev experience.
+
+* **CORS origins** — by default the API only accepts cross-origin
+  requests from common localhost ports (Streamlit on 8501, Uvicorn on
+  8000, etc.). Override with:
+
+    - ``AGENTXAI_CORS_ORIGINS=https://my.app,https://other.app`` —
+      explicit allow-list (comma-separated).
+    - ``AGENTXAI_ALLOW_CORS_ALL=true`` — emergency wildcard, restoring
+      the old ``["*"]`` behaviour. Only use when you genuinely need to
+      accept any origin (e.g., a public demo); never with a non-empty
+      ``AGENTXAI_API_TOKEN`` would-be-credentialled flow.
+
+* **POST /tasks/run token** — disabled by default. Set
+  ``AGENTXAI_API_TOKEN=<secret>`` and clients must send
+  ``Authorization: Bearer <secret>`` on the run endpoint or get 401.
+  Read endpoints stay unauthenticated — they only expose data the
+  caller could see by reading the SQLite file directly.
 """
 
 from __future__ import annotations
 
+import os
 from functools import lru_cache
 from typing import Any, Dict, List, Optional
 
@@ -15,7 +39,7 @@ from dotenv import load_dotenv
 
 load_dotenv(override=True)
 
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -221,13 +245,88 @@ def _paginate_tasks(
 
 app = FastAPI(title="AgentXAI API", version="0.1.0")
 
+
+# ---------------------------------------------------------------------------
+# CORS — env-driven, localhost-only by default
+# ---------------------------------------------------------------------------
+
+# Built-in localhost allow-list. Covers the Streamlit dashboard (8501),
+# the API itself (8000), and the equivalent loopback variants. Both
+# 127.0.0.1 and localhost are listed because browsers treat them as
+# distinct origins — same machine, different host strings.
+_DEFAULT_LOCAL_ORIGINS: List[str] = [
+    "http://localhost:8501", "http://127.0.0.1:8501",
+    "http://localhost:8000", "http://127.0.0.1:8000",
+    "http://localhost:3000", "http://127.0.0.1:3000",
+]
+
+
+def _resolve_cors_origins() -> List[str]:
+    """
+    Compute the CORS allow-list from env, in priority order:
+
+      1. ``AGENTXAI_ALLOW_CORS_ALL=true`` → ``["*"]`` (emergency override).
+      2. ``AGENTXAI_CORS_ORIGINS`` (comma-separated) → that list verbatim.
+      3. Default localhost-only allow-list.
+
+    Pulled into a function so tests can monkey-patch the env and rebuild
+    the app without restarting the process.
+    """
+    if os.environ.get("AGENTXAI_ALLOW_CORS_ALL", "").lower() == "true":
+        return ["*"]
+    raw = os.environ.get("AGENTXAI_CORS_ORIGINS", "").strip()
+    if raw:
+        return [o.strip() for o in raw.split(",") if o.strip()]
+    return list(_DEFAULT_LOCAL_ORIGINS)
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_resolve_cors_origins(),
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# ---------------------------------------------------------------------------
+# Optional API-token auth for write endpoints
+# ---------------------------------------------------------------------------
+
+# Token-validating dependency. When AGENTXAI_API_TOKEN is unset (the
+# local-dev default) every call passes through; when set, requests must
+# carry ``Authorization: Bearer <token>`` matching the env var.
+def verify_api_token(
+    authorization: Optional[str] = Header(default=None),
+) -> None:
+    """
+    Validate the optional bearer token on write endpoints.
+
+    Reads the expected token from ``AGENTXAI_API_TOKEN`` at request time
+    so tests (and ops) can rotate it without restarting the app. When
+    the env var is unset/empty the dependency is a no-op — the friction
+    of token configuration is reserved for users who actually want auth.
+
+    Raises ``HTTPException(401)`` on missing/malformed/wrong token.
+    """
+    expected = (os.environ.get("AGENTXAI_API_TOKEN") or "").strip()
+    if not expected:
+        return  # no token configured → no auth required (local dev)
+
+    if not authorization:
+        raise HTTPException(
+            status_code=401,
+            detail="Missing Authorization header. "
+                   "Set 'Authorization: Bearer <token>' to call write endpoints.",
+        )
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not token:
+        raise HTTPException(
+            status_code=401,
+            detail="Authorization header must be 'Bearer <token>'.",
+        )
+    if token.strip() != expected:
+        raise HTTPException(status_code=401, detail="Invalid API token.")
 
 
 @app.get("/tasks", response_model=TaskListResponse)
@@ -322,6 +421,13 @@ def get_accountability(
 def run_task(
     req: RunTaskRequest,
     pipeline: Any = Depends(get_pipeline),
+    _auth: None = Depends(verify_api_token),
 ) -> RunTaskResponse:
+    """
+    Execute the full pipeline against `req.record` and return the new task_id.
+
+    Token-protected when ``AGENTXAI_API_TOKEN`` is set in the server's
+    environment; unauthenticated otherwise (default local-dev mode).
+    """
     result = pipeline.run_task(req.record)
     return RunTaskResponse(task_id=result.task_id)

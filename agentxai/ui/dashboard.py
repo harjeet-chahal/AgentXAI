@@ -28,6 +28,19 @@ import streamlit.components.v1 as components
 API_BASE = os.environ.get("AGENTXAI_API_URL", "http://localhost:8000")
 HTTP_TIMEOUT = 30
 
+
+def _api_headers() -> Dict[str, str]:
+    """
+    Build outbound request headers.
+
+    Read ``AGENTXAI_API_TOKEN`` at call time (not module load time) so a
+    running Streamlit session picks up a freshly exported token without
+    a server restart. When unset, no Authorization header is sent and
+    the API treats the call as un-authed (matching its local-dev default).
+    """
+    token = (os.environ.get("AGENTXAI_API_TOKEN") or "").strip()
+    return {"Authorization": f"Bearer {token}"} if token else {}
+
 # Four distinct, colorblind-friendly hues — one per agent_id.
 AGENT_PALETTE = ["#2E86AB", "#E63946", "#06A77D", "#F4A261"]
 TAB_LABELS = [
@@ -358,6 +371,61 @@ def _sort_by_count(d: Dict[str, int], reverse: bool = True) -> List[Tuple[str, i
     return sorted(d.items(), key=lambda kv: kv[1], reverse=reverse)
 
 
+# Per-tab plain-English explainers. Prepended to each _summarize_*
+# headline so the blue summary box reads like a "what this tab shows"
+# sentence followed by the count summary, instead of a stat dump.
+_PILLAR_EXPLAINERS: Dict[str, str] = {
+    "trajectory": (
+        "This tab shows the full step-by-step execution trace. The case "
+        "moves from the Orchestrator through the specialists to the "
+        "Synthesizer, with every action timestamped."
+    ),
+    "plans": (
+        "This tab checks whether each agent followed its intended plan, "
+        "and surfaces any deviation between intended and actual actions."
+    ),
+    "tools": (
+        "This tab explains which tools were called and which one affected "
+        "the answer most. <code>pubmed_search</code> is a "
+        "<i>local textbook FAISS search</i>, not the real PubMed API — "
+        "the historical name is preserved on stored records."
+    ),
+    "memory": (
+        "This tab shows what each agent wrote to memory and (when "
+        "<code>memory_usage</code> attribution is available) whether the "
+        "Synthesizer actually cited it in the final rationale."
+    ),
+    "messages": (
+        "This tab shows messages between agents and whether downstream "
+        "agents acted on them — an unacted-upon message is a strong hint "
+        "that its sender's contribution was ignored."
+    ),
+    "causality": (
+        "This tab shows the causal graph connecting earlier events to the "
+        "final answer. Stronger edges indicate larger estimated influence "
+        "via counterfactual perturbations."
+    ),
+    "accountability": (
+        "This tab combines all XAI signals into a final accountability "
+        "report. Responsibility is a <b>composite</b> of counterfactual "
+        "impact, tool impact, acted-upon messages, used memory, "
+        "self-reported usefulness, and causal centrality — weighted by "
+        "question type. See <code>XAIScoringConfig</code> for the knobs."
+    ),
+}
+
+
+def _prepend_explainer(tab_key: str, headline: str) -> str:
+    """Return the explainer paragraph + the original count headline."""
+    explainer = _PILLAR_EXPLAINERS.get(tab_key)
+    if not explainer:
+        return headline
+    return (
+        f"<div style='margin-bottom:8px;color:#222;'>{explainer}</div>"
+        f"{headline}"
+    )
+
+
 def _summarize_trajectory(events: List[Dict[str, Any]]) -> Summary:
     if not events:
         return ("No trajectory events recorded for this task.", [])
@@ -397,7 +465,7 @@ def _summarize_trajectory(events: List[Dict[str, Any]]) -> Summary:
             f"<code>{agent_id}</code> — <b>{len(ev_list)} events</b> "
             f"({breakdown})"
         )
-    return headline, bullets
+    return _prepend_explainer("trajectory", headline), bullets
 
 
 def _summarize_plans(plans: List[Dict[str, Any]]) -> Summary:
@@ -445,7 +513,27 @@ def _summarize_plans(plans: List[Dict[str, Any]]) -> Summary:
         else:
             line += " (no deviations)"
         bullets.append(line)
-    return headline, bullets
+    return _prepend_explainer("plans", headline), bullets
+
+
+# Tools whose internal `tool_name` is preserved for backward compatibility
+# but whose actual implementation is something different from what the name
+# suggests. The dashboard surfaces the truth in user-facing strings while
+# leaving stored records (`tool_use_events.tool_name`) untouched.
+#
+# `pubmed_search` is currently a local FAISS retrieval over 18 medical
+# textbooks — see `agentxai/tools/pubmed_search.py` for why the name is
+# kept and how to swap in real PubMed.
+_TOOL_DISPLAY_OVERRIDES: Dict[str, str] = {
+    "pubmed_search": "pubmed_search (local textbook FAISS)",
+}
+
+
+def _tool_display_name(tool_name: Optional[str]) -> str:
+    """User-facing tool label, with overrides for misleading historical names."""
+    if not tool_name:
+        return "?"
+    return _TOOL_DISPLAY_OVERRIDES.get(tool_name, tool_name)
 
 
 def _summarize_tools(tool_calls: List[Dict[str, Any]]) -> Summary:
@@ -468,7 +556,7 @@ def _summarize_tools(tool_calls: List[Dict[str, Any]]) -> Summary:
         reverse=True,
     )
     top = ranked[0]
-    top_name = top.get("tool_name") or "?"
+    top_name = _tool_display_name(top.get("tool_name"))
     top_score = float(top.get("downstream_impact_score") or 0)
     top_caller = top.get("called_by") or "?"
 
@@ -482,7 +570,7 @@ def _summarize_tools(tool_calls: List[Dict[str, Any]]) -> Summary:
 
     bullets = []
     for c in ranked[: min(3, len(ranked))]:
-        name = c.get("tool_name") or "?"
+        name = _tool_display_name(c.get("tool_name"))
         caller = c.get("called_by") or "?"
         score = float(c.get("downstream_impact_score") or 0)
         dur = float(c.get("duration_ms") or 0)
@@ -494,7 +582,7 @@ def _summarize_tools(tool_calls: List[Dict[str, Any]]) -> Summary:
         bullets.append(
             f"<i>+ {len(ranked) - 3} more call(s) below this in impact ranking.</i>"
         )
-    return headline, bullets
+    return _prepend_explainer("tools", headline), bullets
 
 
 def _summarize_memory(memory_diffs: List[Dict[str, Any]]) -> Summary:
@@ -534,7 +622,7 @@ def _summarize_memory(memory_diffs: List[Dict[str, Any]]) -> Summary:
         bullets.append(f"<code>{k}</code> — <b>{n} write(s)</b> by {who}")
     if len(by_key) > 4:
         bullets.append(f"<i>+ {len(by_key) - 4} more key(s).</i>")
-    return headline, bullets
+    return _prepend_explainer("memory", headline), bullets
 
 
 def _summarize_messages(messages: List[Dict[str, Any]]) -> Summary:
@@ -577,7 +665,7 @@ def _summarize_messages(messages: List[Dict[str, Any]]) -> Summary:
         )
     if len(sorted_pairs) > 4:
         bullets.append(f"<i>+ {len(sorted_pairs) - 4} more channel(s).</i>")
-    return headline, bullets
+    return _prepend_explainer("messages", headline), bullets
 
 
 def _summarize_causality(
@@ -625,7 +713,7 @@ def _summarize_causality(
         bullets.append(
             f"<code>{t}</code> — <b>{c} edge(s)</b>, mean strength <b>{avg:.2f}</b>"
         )
-    return headline, bullets
+    return _prepend_explainer("causality", headline), bullets
 
 
 def _summarize_accountability(report: Optional[Dict[str, Any]]) -> Summary:
@@ -659,7 +747,12 @@ def _summarize_accountability(report: Optional[Dict[str, Any]]) -> Summary:
         bullets.append(
             f"Causal chain length: <b>{len(chain)}</b> events linking inputs to outcome."
         )
-    return headline, bullets
+    # Surface the root-cause reason as a bullet so the user can see *why*
+    # the selector picked that event without opening the JSON expander.
+    root_reason = report.get("root_cause_reason") or ""
+    if root_reason:
+        bullets.append(f"Root-cause reason: <i>{root_reason}</i>")
+    return _prepend_explainer("accountability", headline), bullets
 
 
 def render_tab_summary(
@@ -727,6 +820,640 @@ def _info_card(eyebrow: str, title: str, sub: str = "", variant: str = "accent")
     )
 
 
+def _extract_top_evidence(xai: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """
+    Pull Specialist B's most-recent ``top_evidence`` value from the task's
+    memory diffs. Returns ``[]`` when no Specialist B evidence write has
+    been recorded (older runs, or runs where SpecialistB short-circuited).
+    """
+    from agentxai.xai.evidence_attribution import (
+        latest_top_evidence_from_memory_diffs,
+    )
+    diffs = (xai or {}).get("memory_diffs") or []
+    return latest_top_evidence_from_memory_diffs(diffs)
+
+
+def _render_evidence_cards(
+    top_evidence: List[Dict[str, Any]],
+    used_ids: List[str],
+) -> None:
+    """
+    Render one expandable card per retrieved evidence doc.
+
+    Each card header shows: doc_id (short), source_file, FAISS score, and
+    a "✓ used in rationale" badge when applicable. Clicking the expander
+    reveals the full snippet. Renders nothing when there's no evidence —
+    older records and short-circuited runs don't get a stray empty header.
+    """
+    if not top_evidence:
+        return
+
+    used_set = {str(x) for x in (used_ids or []) if x}
+    used_count = sum(
+        1 for ev in top_evidence
+        if isinstance(ev, dict) and str(ev.get("doc_id") or "") in used_set
+    )
+
+    st.markdown(
+        '<div class="xai-card-eyebrow" style="margin-top:14px;">'
+        f'Retrieved evidence · {len(top_evidence)} doc(s) · '
+        f'{used_count} cited in rationale'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+
+    for i, ev in enumerate(top_evidence):
+        if not isinstance(ev, dict):
+            continue
+        doc_id = str(ev.get("doc_id") or "").strip() or f"doc-{i + 1}"
+        source = str(ev.get("source_file") or "?")
+        try:
+            score = float(ev.get("score", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            score = 0.0
+        snippet = str(ev.get("snippet") or ev.get("text") or "").strip()
+        is_used = doc_id in used_set
+        used_badge = "✓ used" if is_used else "·"
+        score_str = f"{score:.2f}" if score else "—"
+        # Truncate the doc_id so long FAISS chunk names don't dominate.
+        short_id = doc_id if len(doc_id) <= 32 else doc_id[:29] + "…"
+        header = (
+            f"{used_badge}  `{short_id}`  ·  {source}  ·  score {score_str}"
+        )
+        with st.expander(header, expanded=False):
+            if snippet:
+                st.write(snippet)
+            else:
+                st.caption("_(no snippet recorded)_")
+            cols = st.columns(3)
+            cols[0].metric("doc_id", short_id)
+            cols[1].metric("source_file", source)
+            cols[2].metric(
+                "score", score_str,
+                help="FAISS cosine similarity to the patient case.",
+            )
+            if is_used:
+                st.caption(
+                    "✓ This doc's content appears in the Synthesizer's "
+                    "rationale (explicit `supporting_evidence_ids` or "
+                    "heuristic substring match)."
+                )
+            else:
+                st.caption(
+                    "Not cited in the rationale — included here as a "
+                    "high-similarity retrieval result."
+                )
+
+
+# Display labels + tooltips for confidence_factors. Order matches
+# `agentxai.xai.confidence_factors.FACTOR_KEYS`. Factor names are kept
+# verbatim (snake_case) in the dashboard so they line up with the JSON
+# field surfaced via the API and the heuristic module.
+_CONFIDENCE_FACTOR_LABELS: Dict[str, str] = {
+    "retrieval_relevance":
+        "Mean similarity of Specialist B's retrieved evidence (FAISS).",
+    "option_match_strength":
+        "How cleanly the chosen option matches the listed options + per-option verdict.",
+    "specialist_agreement":
+        "Fraction of specialists whose memory mentions the predicted diagnosis.",
+    "evidence_coverage":
+        "Number of supporting evidence ids cited (target: 3+).",
+    "contradiction_penalty":
+        "Fraction of options marked 'partial' — competing candidates.",
+}
+
+
+def _render_confidence_factors_panel(
+    *,
+    confidence: Any,
+    factors: Dict[str, Any],
+) -> None:
+    """
+    Render the heuristic confidence breakdown next to the prediction.
+
+    Skips silently when `factors` is empty — older records produced before
+    confidence_factors existed don't carry the field, and the panel
+    shouldn't appear with all-zero rows in that case.
+
+    The panel intentionally calls confidence "heuristic" — these factors
+    do NOT add up to the headline confidence; they're soft observable
+    signals showing what *could* be driving it. The headline is the LLM's
+    self-report and is not clinically calibrated.
+    """
+    if not isinstance(factors, dict) or not factors:
+        return
+
+    conf_str = (
+        f"{float(confidence):.2f}"
+        if isinstance(confidence, (int, float)) else "—"
+    )
+    rows = []
+    for key, label in _CONFIDENCE_FACTOR_LABELS.items():
+        if key not in factors:
+            continue
+        try:
+            val = max(0.0, min(1.0, float(factors[key])))
+        except (TypeError, ValueError):
+            continue
+        pct = val * 100
+        rows.append(
+            '<div style="margin:6px 0;">'
+            f'<div style="display:flex;justify-content:space-between;'
+            f'font-size:0.85rem;">'
+            f'<span title="{label}"><b>{key}</b></span>'
+            f'<span style="color:#444;">{val:.2f}</span>'
+            '</div>'
+            '<div style="height:6px;background:#eee;border-radius:3px;'
+            'overflow:hidden;">'
+            f'<div style="height:100%;width:{pct:.1f}%;background:#2E86AB;"></div>'
+            '</div>'
+            '</div>'
+        )
+    if not rows:
+        return
+
+    st.markdown(
+        f'<div class="xai-card" style="margin-top:14px;padding:14px 16px;">'
+        f'<div class="xai-card-eyebrow">Confidence breakdown · headline {conf_str}</div>'
+        + "".join(rows)
+        + '<div style="margin-top:8px;font-size:0.75rem;color:#888;">'
+        '⚠ Heuristic only — these factors decompose the LLM\'s self-reported '
+        'confidence into observable signals. They are <b>not clinically '
+        'calibrated</b> and do not represent a probability of correctness.'
+        '</div>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Summary-page helpers (case story, what mattered, evidence, faithfulness)
+# ---------------------------------------------------------------------------
+#
+# Each function takes the loose JSON-shaped `record` dict the API returns and
+# produces a small, render-ready string or list. They're factored out of
+# render_case_overview so:
+#   * each card's prose is testable in isolation,
+#   * an old record with missing fields degrades to a graceful fallback line
+#     instead of crashing or showing "—" everywhere,
+#   * the Summary page reads top-to-bottom as a story, not a stat dump.
+
+# Aggregator action labels used by `_is_aggregator_event` and the
+# faithfulness snapshot. Mirrors the canonical list in
+# `agentxai.xai.accountability` and `agentxai.ui.faithfulness_checks`.
+_SUMMARY_AGGREGATOR_ACTIONS = frozenset({
+    "read_specialist_memories", "handoff_to_synthesizer",
+    "decompose_case", "dispatch_specialists",
+    "aggregate_findings", "compile_results",
+})
+_SUMMARY_AGGREGATOR_PREFIXES = ("route_to_", "handoff_to_", "dispatch_")
+
+
+def _is_aggregator_event(event: Optional[Dict[str, Any]]) -> bool:
+    """True iff `event` is a routing / aggregation step, not a real decision."""
+    if not isinstance(event, dict):
+        return False
+    action = str(event.get("action") or "").strip().lower()
+    if action in _SUMMARY_AGGREGATOR_ACTIONS:
+        return True
+    if any(action.startswith(p) for p in _SUMMARY_AGGREGATOR_PREFIXES):
+        return True
+    et = str(event.get("event_type") or "").strip().lower()
+    return et in {"plan", "routing"}
+
+
+# Substring the selector appends to `root_cause_reason` when every
+# ancestor of the terminal was an aggregator and it had to fall back.
+# Surfacing this distinct case in the UI is the whole point of the
+# staleness check below.
+_FALLBACK_MARKER_SUBSTR = "no non-aggregator ancestor"
+
+
+def _is_stale_accountability_report(report: Optional[Dict[str, Any]]) -> bool:
+    """
+    True if the report was generated by code that predates the new
+    selector + memory_usage attribution, OR if the selector ran but had
+    to fall back to an aggregator root cause (i.e., no causal edges
+    from specialists to the terminal — usually because the run predates
+    `traced_action`-linked memory writes).
+
+    The Summary and Accountability surfaces use this to decide whether
+    to show the "Re-run the task to refresh root-cause attribution"
+    banner. The check is deliberately conservative: a non-stale report
+    has populated `root_cause_reason` AND a non-aggregator root cause.
+    """
+    if not isinstance(report, dict) or not report:
+        return False  # No report to be stale about.
+
+    # Pre-selector records have no `root_cause_reason` field populated.
+    if not (report.get("root_cause_reason") or "").strip():
+        return True
+
+    # Selector ran but fell back to an aggregator — surfaced in the
+    # reason text via the marker the selector appends. This is a
+    # post-fix record but the run itself is degenerate.
+    reason = (report.get("root_cause_reason") or "").lower()
+    if _FALLBACK_MARKER_SUBSTR in reason:
+        return True
+
+    # Belt-and-suspenders: the report's `memory_usage` field is empty
+    # AND the underlying record has memory writes — means the
+    # attribution pass never ran for this report. (Empty `memory_usage`
+    # is fine when the agents genuinely wrote nothing — covered by the
+    # report-only check above falling through.)
+    return False
+
+
+def _staleness_message(report: Optional[Dict[str, Any]]) -> str:
+    """
+    Return the user-facing banner text for a stale report, or "" if not
+    stale. Distinguishes the two staleness modes so the message points
+    at the right remediation:
+
+      * Pre-selector records get the canonical "Re-run the task to
+        refresh root-cause attribution" message.
+      * Post-selector aggregator-fallback records get a more nuanced
+        message naming the underlying cause.
+    """
+    if not _is_stale_accountability_report(report):
+        return ""
+    reason = (report.get("root_cause_reason") or "").lower()
+    if not reason:
+        return (
+            "This task was generated with an older accountability method. "
+            "Re-run the task to refresh root-cause attribution."
+        )
+    if _FALLBACK_MARKER_SUBSTR in reason:
+        return (
+            "Selector fell back to an aggregator event because no "
+            "non-aggregator ancestor was found in the causal graph — "
+            "usually because this run predates `traced_action`-linked "
+            "memory writes. Re-run the task to refresh attribution."
+        )
+    return (
+        "This task's accountability report looks stale. "
+        "Re-run the task to refresh attribution."
+    )
+
+
+def _render_staleness_banner(report: Optional[Dict[str, Any]]) -> None:
+    """
+    Render an in-place yellow warning banner when the report is stale.
+    Renders nothing for fresh reports.
+    """
+    msg = _staleness_message(report)
+    if not msg:
+        return
+    st.markdown(
+        '<div style="margin:14px 0;padding:12px 16px;border-radius:6px;'
+        'background:#fff7e6;border-left:4px solid #F4A261;color:#7a4f00;">'
+        f'⚠ <b>{msg}</b>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+
+
+def _top_responsible_agent(report: Optional[Dict[str, Any]]) -> Optional[str]:
+    """Return the single highest-responsibility agent_id, or None."""
+    if not report:
+        return None
+    scores = report.get("agent_responsibility_scores") or {}
+    if not scores:
+        return None
+    return max(scores.items(), key=lambda kv: float(kv[1]))[0]
+
+
+def _get_supporting_evidence(
+    record: Dict[str, Any], top_n: int = 3,
+) -> List[Dict[str, Any]]:
+    """
+    Return up to `top_n` supporting evidence dicts the Summary should
+    surface. Prefers items the rationale *used* (per
+    `system_output.supporting_evidence_ids`); fills the rest from the
+    highest-FAISS-score retrieved docs to give reviewers context even
+    when the LLM under-cited.
+    """
+    xai = record.get("xai_data") or {}
+    system_output = record.get("system_output") or {}
+    top_evidence = _extract_top_evidence(xai)
+    if not top_evidence:
+        return []
+
+    used_ids = {
+        str(x) for x in (system_output.get("supporting_evidence_ids") or [])
+        if x
+    }
+    used: List[Dict[str, Any]] = []
+    others: List[Dict[str, Any]] = []
+    for ev in top_evidence:
+        if not isinstance(ev, dict):
+            continue
+        annotated = dict(ev)
+        annotated["used_in_rationale"] = (
+            str(ev.get("doc_id") or "") in used_ids
+        )
+        if annotated["used_in_rationale"]:
+            used.append(annotated)
+        else:
+            others.append(annotated)
+    others.sort(
+        key=lambda e: float(e.get("score") or 0.0), reverse=True,
+    )
+    return (used + others)[:top_n]
+
+
+def _build_final_answer_sentence(record: Dict[str, Any]) -> str:
+    """
+    Produce the lead-line sentence for the Final Answer card.
+
+    Example: "The system answered E — 'HIV-1/HIV-2 antibody differentiation
+    immunoassay' — and this matched the ground truth. Confidence was 0.90.
+    The case was classified as a screening_or_test question."
+    """
+    system_output = record.get("system_output") or {}
+    ground_truth = record.get("ground_truth") or {}
+    input_data = record.get("input") or {}
+
+    predicted_letter = (
+        system_output.get("predicted_letter")
+        or ground_truth.get("correct_answer")
+        or ""
+    )
+    predicted_text = (
+        system_output.get("predicted_text")
+        or system_output.get("final_diagnosis")
+        or ""
+    )
+    correct = system_output.get("correct")
+    confidence = system_output.get("confidence")
+    qtype = input_data.get("question_type") or "unknown"
+    correct_letter = ground_truth.get("correct_answer") or ""
+
+    parts: List[str] = []
+    if predicted_letter and predicted_text:
+        parts.append(f"The system answered {predicted_letter} — '{predicted_text}'")
+    elif predicted_text:
+        parts.append(f"The system answered '{predicted_text}'")
+    else:
+        parts.append("The system did not produce a final answer for this case")
+
+    if correct is True:
+        parts.append("and this matched the ground truth")
+    elif correct is False:
+        truth_str = (
+            f" (correct answer was {correct_letter})"
+            if correct_letter else ""
+        )
+        parts.append(f"but this did NOT match the ground truth{truth_str}")
+    else:
+        parts.append("but no ground-truth label was recorded")
+
+    sentence = ", ".join(parts) + "."
+    if isinstance(confidence, (int, float)):
+        sentence += f" Confidence was {float(confidence):.2f}."
+    if qtype and qtype != "unknown":
+        sentence += f" The case was classified as a {qtype} question."
+    return sentence
+
+
+def _build_pipeline_story_bullets(record: Dict[str, Any]) -> List[str]:
+    """
+    Describe the agent flow as a short bullet list, dynamically detecting
+    which stages actually ran for this record.
+
+    Falls back to a static four-step story when the trajectory is too sparse
+    to infer the flow from observed events.
+    """
+    xai = record.get("xai_data") or {}
+    trajectory = xai.get("trajectory") or []
+    tool_calls = xai.get("tool_calls") or []
+
+    agents_seen = {ev.get("agent_id") for ev in trajectory if ev.get("agent_id")}
+
+    bullets: List[str] = []
+
+    if "orchestrator" in agents_seen:
+        bullets.append(
+            "<b>Orchestrator</b> decomposed the case and routed it to the specialists."
+        )
+    if "specialist_a" in agents_seen:
+        bullets.append(
+            "<b>Specialist A</b> performed symptom extraction, "
+            "condition lookup, and severity scoring."
+        )
+    if "specialist_b" in agents_seen:
+        # If the search actually ran, name the tool honestly.
+        ran_search = any(
+            (t.get("tool_name") or "").lower() == "pubmed_search"
+            for t in tool_calls
+        )
+        if ran_search:
+            bullets.append(
+                "<b>Specialist B</b> retrieved medical evidence using "
+                "<i>local textbook FAISS search</i> and matched candidate "
+                "conditions against guideline stubs."
+            )
+        else:
+            bullets.append(
+                "<b>Specialist B</b> ran candidate-condition retrieval + guideline lookup."
+            )
+    if "synthesizer" in agents_seen:
+        bullets.append(
+            "<b>Synthesizer</b> read both specialists' memories and produced the final answer."
+        )
+    bullets.append(
+        "The <b>XAI runtime</b> logged trajectory, plans, tool provenance, "
+        "memory diffs, messages, the causal DAG, and the accountability report."
+    )
+    if not bullets:
+        bullets = [
+            "Pipeline trace is sparse for this record — cannot reconstruct "
+            "the agent flow in detail."
+        ]
+    return bullets
+
+
+def _build_what_mattered_paragraph(record: Dict[str, Any]) -> str:
+    """
+    Plain-English narrative of which signals drove the outcome.
+
+    Consults the accountability report for the top agent, the most-impactful
+    tool, the most-influential message, and the root-cause event. Adds an
+    "Specialist A contributed little" sentence when its share is below a
+    small threshold and it has no observable signals.
+    """
+    xai = record.get("xai_data") or {}
+    report = xai.get("accountability_report") or {}
+    if not report:
+        return (
+            "No accountability report recorded for this task — the run may "
+            "not have completed the full XAI pipeline."
+        )
+
+    scores = report.get("agent_responsibility_scores") or {}
+    tool_calls = xai.get("tool_calls") or []
+    messages = xai.get("messages") or []
+    trajectory = xai.get("trajectory") or []
+    ev_map = {e.get("event_id"): e for e in trajectory}
+
+    top_agent = _top_responsible_agent(report)
+    top_score = float(scores.get(top_agent, 0.0)) if top_agent else 0.0
+
+    # Tool the report flagged as most impactful (resolved to its name).
+    impactful_tool_id = report.get("most_impactful_tool_call_id") or ""
+    tool_name, tool_caller, tool_score = "", "", 0.0
+    if impactful_tool_id:
+        tool = next(
+            (t for t in tool_calls if t.get("tool_call_id") == impactful_tool_id),
+            None,
+        )
+        if tool:
+            tool_name = _tool_display_name(tool.get("tool_name"))
+            tool_caller = tool.get("called_by") or ""
+            tool_score = float(tool.get("downstream_impact_score") or 0.0)
+
+    # Most-influential message (resolved to sender → receiver).
+    msg_id = report.get("most_influential_message_id") or ""
+    msg_pair = ""
+    msg_acted = False
+    if msg_id:
+        msg = next((m for m in messages if m.get("message_id") == msg_id), None)
+        if msg:
+            msg_pair = f"{msg.get('sender', '?')} → {msg.get('receiver', '?')}"
+            msg_acted = bool(msg.get("acted_upon"))
+
+    # Root-cause event description. Prefer the selector's own
+    # `root_cause_reason` verbatim — it carries the fallback marker
+    # "(no non-aggregator ancestor; selected from full ancestor set)"
+    # when relevant, so the user sees *why* a degenerate run picked an
+    # aggregator. Only synthesize from event_id/agent when the reason
+    # is missing (pre-selector records).
+    root_summary = (report.get("root_cause_reason") or "").strip()
+    if not root_summary:
+        root_id = report.get("root_cause_event_id") or ""
+        if root_id:
+            root_ev = ev_map.get(root_id) or {}
+            root_action = root_ev.get("action") or root_ev.get("event_type") or "event"
+            root_agent = root_ev.get("agent_id") or "unknown"
+            root_summary = f"{root_action} from {root_agent}"
+
+    sentences: List[str] = []
+    if top_agent:
+        sentences.append(
+            f"The outcome was mainly driven by <b>{top_agent}</b> "
+            f"(responsibility {top_score:.2f})."
+        )
+    if tool_name and tool_score > 0:
+        caller_str = f" called by {tool_caller}" if tool_caller else ""
+        sentences.append(
+            f"The most impactful tool was <code>{tool_name}</code>"
+            f"{caller_str} (impact {tool_score:.2f})."
+        )
+    if msg_pair:
+        msg_phrase = "was acted upon" if msg_acted else "carried the highest weight (heuristic only — not flagged acted_upon)"
+        sentences.append(f"The most influential message was {msg_pair} and {msg_phrase}.")
+    if root_summary:
+        sentences.append(f"The root-cause event was <i>{root_summary}</i>.")
+
+    # "Specialist A contributed little" — only when its responsibility is
+    # below 0.20 AND it has no observable signals (no impactful tool, no
+    # acted-upon message, no cited memory).
+    a_score = float(scores.get("specialist_a", 0.0))
+    if a_score < 0.20:
+        from agentxai.ui.faithfulness_checks import _agent_observable_signals
+        a_signals = _agent_observable_signals("specialist_a", xai, report)
+        if not any(a_signals.values()):
+            sentences.append(
+                "Specialist A contributed little in this case — its symptom "
+                "lookup produced no candidate conditions, no acted-upon "
+                "message, and no cited memory."
+            )
+
+    if not sentences:
+        return "The accountability report is empty for this task."
+    return " ".join(sentences)
+
+
+def _build_faithfulness_snapshot(
+    record: Dict[str, Any],
+) -> List[Tuple[str, str, str]]:
+    """
+    Produce a 5-row checklist of high-level faithfulness signals for the
+    Summary card. Returns ``[(label, status, note)]`` where status is
+    ``"pass" | "warn" | "fail" | "skip"``.
+
+    Reuses the canonical checks in `agentxai.ui.faithfulness_checks` so the
+    Summary card and the Accountability tab's panel stay consistent.
+    """
+    from agentxai.ui.faithfulness_checks import (
+        check_impactful_tool_on_chain,
+        check_no_undeserved_responsibility,
+        check_rationale_cites_evidence,
+        check_root_cause_not_aggregator,
+        check_top_agent_has_signal,
+    )
+
+    xai = record.get("xai_data") or {}
+    report = xai.get("accountability_report") or {}
+    trajectory = xai.get("trajectory") or []
+
+    rows: List[Tuple[str, str, str]] = [
+        (
+            "Top agent has observable signal",
+            check_top_agent_has_signal(record).get("status", "skip"),
+            "",
+        ),
+        (
+            "Most-impactful tool is on causal path",
+            check_impactful_tool_on_chain(record).get("status", "skip"),
+            "",
+        ),
+        (
+            "Root cause is not an aggregator",
+            check_root_cause_not_aggregator(record).get("status", "skip"),
+            "",
+        ),
+        (
+            "Rationale references retrieved evidence",
+            check_rationale_cites_evidence(record).get("status", "skip"),
+            "",
+        ),
+        (
+            "No high-responsibility agent with empty signals",
+            check_no_undeserved_responsibility(record).get("status", "skip"),
+            "",
+        ),
+    ]
+
+    # Extra inline warning for the user-mentioned bug pattern: root cause
+    # ended up on a synthesizer aggregation event despite the selector
+    # filter. Reads the trajectory to spot the specific aggregator names.
+    root_id = report.get("root_cause_event_id") or ""
+    if root_id:
+        ev = next((e for e in trajectory if e.get("event_id") == root_id), None)
+        if ev and _is_aggregator_event(ev):
+            rows.append((
+                "⚠ Root cause is an aggregator event",
+                "warn",
+                f"action='{ev.get('action', '?')}' — selector fell back",
+            ))
+    return rows
+
+
+def _render_summary_card(
+    eyebrow: str, body_html: str, variant: str = "accent",
+) -> None:
+    """Render one of the five Summary-page narrative cards."""
+    st.markdown(
+        f'<div class="xai-card is-{variant}" style="margin:14px 0;">'
+        f'<div class="xai-card-eyebrow">{eyebrow}</div>'
+        f'<div class="xai-card-sub" style="font-size:0.95rem;line-height:1.5;'
+        f'color:#222;">{body_html}</div>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+
+
 def render_case_overview(record: Dict[str, Any]) -> None:
     """Large per-case summary — the landing page for the selected task."""
     task_id = record.get("task_id", "—")
@@ -757,6 +1484,16 @@ def render_case_overview(record: Dict[str, Any]) -> None:
         )
     )
 
+    # Question-type pill (set by the heuristic classifier in
+    # `agentxai.data.question_classifier` at task-creation time). Older
+    # records without the field render as "unknown".
+    question_type = (input_data.get("question_type") or "unknown")
+    qtype_pill = (
+        f'<span class="xai-pill" title="Heuristic question-type label '
+        f'used to weight agent responsibility.">'
+        f'Type: <b>&nbsp;{question_type}</b></span>'
+    )
+
     # --- Hero --------------------------------------------------------------
     st.markdown(
         f"""
@@ -765,6 +1502,7 @@ def render_case_overview(record: Dict[str, Any]) -> None:
           <h1 class="xai-hero-title">{final_diagnosis}</h1>
           <div class="xai-hero-meta">
             {correct_pill}
+            {qtype_pill}
             <span class="xai-pill">Ground truth: <b>&nbsp;{correct_answer}</b></span>
             <span class="xai-pill">Confidence: <b>&nbsp;{conf_str}</b></span>
           </div>
@@ -773,48 +1511,101 @@ def render_case_overview(record: Dict[str, Any]) -> None:
         unsafe_allow_html=True,
     )
 
-    # --- Aggregate counts (right under hero) -------------------------------
+    # Aggregate counts pulled once for the rest of the page.
     trajectory = xai.get("trajectory", []) or []
     plans = xai.get("plans", []) or []
     tool_calls = xai.get("tool_calls", []) or []
     memory_diffs = xai.get("memory_diffs", []) or []
     messages = xai.get("messages", []) or []
-    causal_graph = xai.get("causal_graph", {}) or {}
-    edges = causal_graph.get("edges") or []
-    writes = [
-        m for m in memory_diffs
-        if (m.get("operation") or "").lower() == "write"
-    ]
-    deviations_total = sum(len(p.get("deviations") or []) for p in plans)
-    acted_msgs = sum(1 for m in messages if m.get("acted_upon"))
-    agents_seen = (
-        {ev.get("agent_id") for ev in trajectory if ev.get("agent_id")}
-        | {p.get("agent_id") for p in plans if p.get("agent_id")}
+
+    # ─── Card 1: Final Answer ───────────────────────────────────────────────
+    _render_summary_card(
+        "Final answer",
+        _build_final_answer_sentence(record),
+        variant=("success" if correct else "error" if correct is False else "accent"),
     )
 
-    cards = [
-        _stat_card(
-            "Events", str(len(trajectory)),
-            f"{len(agents_seen)} agents involved" if agents_seen else "",
-        ),
-        _stat_card(
-            "Plans", str(len(plans)),
-            f"{deviations_total} deviation(s)" if deviations_total else "no deviations",
-        ),
-        _stat_card("Tool calls", str(len(tool_calls)), ""),
-        _stat_card("Memory writes", str(len(writes)), ""),
-        _stat_card(
-            "Messages", str(len(messages)),
-            f"{acted_msgs} acted upon" if messages else "",
-        ),
-        _stat_card("Causal edges", str(len(edges)), ""),
-    ]
-    st.markdown(
-        '<div class="xai-stat-grid">' + "".join(cards) + '</div>',
-        unsafe_allow_html=True,
+    # ─── Card 2: Pipeline Story ─────────────────────────────────────────────
+    bullets = _build_pipeline_story_bullets(record)
+    bullets_html = "".join(f"<li style='margin:4px 0;'>{b}</li>" for b in bullets)
+    _render_summary_card(
+        "Pipeline story",
+        f"<ul style='padding-left:20px;margin:4px 0;'>{bullets_html}</ul>",
     )
 
-    # --- Patient case + answer reasoning -----------------------------------
+    # ─── Card 3: What actually mattered ─────────────────────────────────────
+    # Banner first so users see the "re-run needed" warning before they
+    # try to act on the (possibly stale) attribution prose below it.
+    _render_staleness_banner(report)
+    _render_summary_card(
+        "What actually mattered",
+        _build_what_mattered_paragraph(record),
+    )
+
+    # ─── Card 4: Evidence used ──────────────────────────────────────────────
+    evidence_items = _get_supporting_evidence(record, top_n=3)
+    if evidence_items:
+        rows = []
+        for ev in evidence_items:
+            doc_id = str(ev.get("doc_id") or "?")
+            source = str(ev.get("source_file") or "?")
+            try:
+                score = float(ev.get("score") or 0.0)
+            except (TypeError, ValueError):
+                score = 0.0
+            snippet = str(ev.get("snippet") or ev.get("text") or "").strip()
+            if len(snippet) > 220:
+                snippet = snippet[:217] + "…"
+            badge = (
+                "<span style='color:#06A77D;'>✓ used in rationale</span>"
+                if ev.get("used_in_rationale")
+                else "<span style='color:#888;'>· retrieved but not cited</span>"
+            )
+            rows.append(
+                "<div style='padding:8px 0;border-bottom:1px solid #eee;'>"
+                f"<div style='font-size:0.9rem;'><code>{doc_id}</code> · "
+                f"{source} · score {score:.2f} · {badge}</div>"
+                + (f"<div style='color:#444;font-size:0.88rem;margin-top:4px;'>{snippet}</div>"
+                   if snippet else "")
+                + "</div>"
+            )
+        _render_summary_card("Evidence used", "".join(rows))
+    else:
+        _render_summary_card(
+            "Evidence used",
+            "<i>No retrieved evidence available for this task.</i>",
+        )
+
+    # ─── Card 5: Faithfulness snapshot ──────────────────────────────────────
+    snapshot_rows = _build_faithfulness_snapshot(record)
+    icons = {"pass": "✓", "warn": "⚠", "fail": "✗", "skip": "⊘"}
+    colors = {
+        "pass": "#06A77D", "warn": "#F4A261",
+        "fail": "#E63946", "skip": "#888888",
+    }
+    snapshot_html = ""
+    for label, status, note in snapshot_rows:
+        icon = icons.get(status, "·")
+        color = colors.get(status, "#888")
+        note_html = (
+            f" <span style='color:#888;font-size:0.85rem;'>— {note}</span>"
+            if note else ""
+        )
+        snapshot_html += (
+            "<div style='padding:4px 0;'>"
+            f"<span style='color:{color};font-weight:bold;'>{icon}</span> "
+            f"{label}{note_html}"
+            "</div>"
+        )
+    _render_summary_card(
+        "Faithfulness snapshot",
+        snapshot_html
+        + "<div style='margin-top:8px;font-size:0.78rem;color:#888;'>"
+        "Heuristic checks. See the Accountability tab for the full panel."
+        "</div>",
+    )
+
+    # ─── The case (patient text + answer options) ───────────────────────────
     _section("The case")
     patient_case = input_data.get("patient_case") or ""
     options = input_data.get("answer_options") or {}
@@ -842,15 +1633,46 @@ def render_case_overview(record: Dict[str, Any]) -> None:
                 'Answer options</div>',
                 unsafe_allow_html=True,
             )
+            predicted_letter = system_output.get("predicted_letter") or ""
+            # Index option_analysis by letter so we can splice the
+            # Synthesizer's per-option reason next to each option line.
+            option_analysis_raw = system_output.get("option_analysis") or []
+            analysis_by_letter: Dict[str, Dict[str, Any]] = {
+                str(o.get("letter", "")).upper(): o
+                for o in option_analysis_raw
+                if isinstance(o, dict) and o.get("letter")
+            }
             for k, v in options.items():
                 if not v:
                     continue
+                k_up = str(k).upper()
                 is_truth = (k == correct_answer)
+                is_pick = (k_up == str(predicted_letter).upper())
                 marker = "🟢 " if is_truth else ""
-                st.markdown(
-                    f"- **{k}.** {marker}{v}"
-                    + ("  _← ground truth_" if is_truth else "")
-                )
+                pick_tag = "  _← model picked_" if is_pick and not is_truth else ""
+                truth_tag = "  _← ground truth_" if is_truth else ""
+                st.markdown(f"- **{k}.** {marker}{v}{truth_tag}{pick_tag}")
+                # Per-option Synthesizer rationale, when present. Verdict
+                # colour-codes the line so the user can scan the table at a
+                # glance: green=correct pick, red=incorrect dismissed,
+                # yellow=partial.
+                entry = analysis_by_letter.get(k_up)
+                if entry and entry.get("reason"):
+                    verdict = (entry.get("verdict") or "").lower()
+                    icon = {
+                        "correct": "✓",
+                        "incorrect": "✗",
+                        "partial": "~",
+                    }.get(verdict, "·")
+                    st.caption(f"&nbsp;&nbsp;&nbsp;{icon} {entry['reason']}")
+
+            # Evidence cards: each retrieved Specialist-B doc with its
+            # source file, FAISS score, snippet, and a badge if it appears
+            # in the Synthesizer's rationale.
+            _render_evidence_cards(
+                top_evidence=_extract_top_evidence(xai),
+                used_ids=system_output.get("supporting_evidence_ids") or [],
+            )
 
     with case_right:
         variant = (
@@ -866,37 +1688,49 @@ def render_case_overview(record: Dict[str, Any]) -> None:
             """,
             unsafe_allow_html=True,
         )
+
+        # Heuristic confidence breakdown — only renders when the system
+        # output carries the new `confidence_factors` key (older records
+        # silently skip this panel).
+        _render_confidence_factors_panel(
+            confidence=confidence,
+            factors=system_output.get("confidence_factors") or {},
+        )
+
         gt_explanation = ground_truth.get("explanation") or ""
         if gt_explanation:
             with st.expander("Ground-truth explanation"):
                 st.write(gt_explanation)
 
-    # --- Responsibility distribution ---------------------------------------
+    # Responsibility distribution (kept as a small bar widget for users
+    # who want the at-a-glance ranking; the prose lives in Card 3).
     scores: Dict[str, float] = report.get("agent_responsibility_scores") or {}
     if scores:
-        _section("Agent responsibility")
-        max_score = max(float(s) for s in scores.values()) or 1.0
-        rows = []
-        for agent_id, score in sorted(
-            scores.items(), key=lambda kv: float(kv[1]), reverse=True
-        ):
-            pct = (float(score) / max_score) * 100
-            rows.append(
-                '<div class="xai-resp-row">'
-                f'<div class="xai-resp-name">{agent_id}</div>'
-                '<div class="xai-resp-bar">'
-                f'<div class="xai-resp-bar-fill" style="width:{pct:.1f}%;"></div>'
-                '</div>'
-                f'<div class="xai-resp-val">{float(score):.2f}</div>'
-                '</div>'
+        with st.expander("Agent responsibility scores", expanded=False):
+            max_score = max(float(s) for s in scores.values()) or 1.0
+            rows = []
+            for agent_id, score in sorted(
+                scores.items(), key=lambda kv: float(kv[1]), reverse=True
+            ):
+                pct = (float(score) / max_score) * 100
+                rows.append(
+                    '<div class="xai-resp-row">'
+                    f'<div class="xai-resp-name">{agent_id}</div>'
+                    '<div class="xai-resp-bar">'
+                    f'<div class="xai-resp-bar-fill" style="width:{pct:.1f}%;"></div>'
+                    '</div>'
+                    f'<div class="xai-resp-val">{float(score):.2f}</div>'
+                    '</div>'
+                )
+            st.markdown(
+                '<div class="xai-card">' + "".join(rows) + '</div>',
+                unsafe_allow_html=True,
             )
-        st.markdown(
-            '<div class="xai-card">' + "".join(rows) + '</div>',
-            unsafe_allow_html=True,
-        )
 
     # --- Key attributions (4 cards) ----------------------------------------
-    _section("Key attributions")
+    # Kept inside an expander since the prose card above already names the
+    # top agent / tool / message / root cause. Power users who want the
+    # raw ids can still pop these open.
     root = report.get("root_cause_event_id") or ""
     impactful_tool_id = report.get("most_impactful_tool_call_id") or ""
     influential_msg_id = report.get("most_influential_message_id") or ""
@@ -980,7 +1814,7 @@ def render_case_overview(record: Dict[str, Any]) -> None:
             if impact > 0:
                 tool_card = _info_card(
                     "Most-impactful tool call",
-                    tool.get("tool_name", "?"),
+                    _tool_display_name(tool.get("tool_name")),
                     (
                         f"Called by {tool.get('called_by', '?')} · "
                         f"impact {impact:.2f}"
@@ -990,7 +1824,7 @@ def render_case_overview(record: Dict[str, Any]) -> None:
             else:
                 tool_card = _info_card(
                     "Most-impactful tool call",
-                    f"{tool.get('tool_name', '?')} · impact 0.00",
+                    f"{_tool_display_name(tool.get('tool_name'))} · impact 0.00",
                     (
                         f"No measurable counterfactual impact — patching any "
                         f"single tool's output didn't change the diagnosis. "
@@ -1047,16 +1881,17 @@ def render_case_overview(record: Dict[str, Any]) -> None:
             "Most-influential message", "Not recorded", "", variant="accent"
         )
 
-    c1, c2 = st.columns(2)
-    c1.markdown(agent_card, unsafe_allow_html=True)
-    c2.markdown(root_card, unsafe_allow_html=True)
-    c3, c4 = st.columns(2)
-    c3.markdown(tool_card, unsafe_allow_html=True)
-    c4.markdown(msg_card, unsafe_allow_html=True)
+    with st.expander("Key attributions (raw ids)", expanded=False):
+        c1, c2 = st.columns(2)
+        c1.markdown(agent_card, unsafe_allow_html=True)
+        c2.markdown(root_card, unsafe_allow_html=True)
+        c3, c4 = st.columns(2)
+        c3.markdown(tool_card, unsafe_allow_html=True)
+        c4.markdown(msg_card, unsafe_allow_html=True)
 
-    if report.get("plan_deviation_summary"):
-        _section("Plan deviation summary")
-        st.write(report["plan_deviation_summary"])
+        if report.get("plan_deviation_summary"):
+            st.markdown("**Plan deviation summary**")
+            st.write(report["plan_deviation_summary"])
 
     # --- CTA ----------------------------------------------------------------
     st.markdown("<div style='margin-top:26px;'></div>", unsafe_allow_html=True)
@@ -1122,13 +1957,19 @@ def _url(path: str) -> str:
 
 
 def api_get(path: str, **params: Any) -> Any:
-    r = requests.get(_url(path), params=params or None, timeout=HTTP_TIMEOUT)
+    r = requests.get(
+        _url(path), params=params or None,
+        headers=_api_headers(), timeout=HTTP_TIMEOUT,
+    )
     r.raise_for_status()
     return r.json()
 
 
 def api_post(path: str, payload: Dict[str, Any]) -> Any:
-    r = requests.post(_url(path), json=payload, timeout=HTTP_TIMEOUT * 10)
+    r = requests.post(
+        _url(path), json=payload,
+        headers=_api_headers(), timeout=HTTP_TIMEOUT * 10,
+    )
     r.raise_for_status()
     return r.json()
 
@@ -1459,6 +2300,24 @@ def render_tool_provenance_tab(tool_calls: List[Dict[str, Any]]) -> None:
 
     calls = sorted(tool_calls, key=lambda t: t.get("timestamp", 0))
 
+    # Surface the display-alias rule so reviewers aren't misled by stored
+    # tool names. We only show the note when an aliased tool actually
+    # appeared in this task — keeps the UI quiet otherwise.
+    aliased_present = sorted({
+        c.get("tool_name", "")
+        for c in calls
+        if c.get("tool_name") in _TOOL_DISPLAY_OVERRIDES
+    })
+    if aliased_present:
+        notes = " · ".join(
+            f"`{name}` → **{_TOOL_DISPLAY_OVERRIDES[name]}**"
+            for name in aliased_present
+        )
+        st.caption(
+            f"ℹ Display alias: {notes}. The stored `tool_name` is preserved "
+            "for backward compatibility with existing records."
+        )
+
     df = pd.DataFrame(
         [
             {
@@ -1497,7 +2356,8 @@ def render_tool_provenance_tab(tool_calls: List[Dict[str, Any]]) -> None:
 
     st.markdown("**Counterfactual re-run**")
     options = [
-        f"#{i + 1} · {c.get('tool_name', '?')} · called_by={c.get('called_by', '?')} · "
+        f"#{i + 1} · {_tool_display_name(c.get('tool_name'))} · "
+        f"called_by={c.get('called_by', '?')} · "
         f"impact={float(c.get('downstream_impact_score') or 0):.2f}"
         for i, c in enumerate(calls)
     ]
@@ -1555,9 +2415,68 @@ def _find_event(trajectory: List[Dict[str, Any]], event_id: str) -> Optional[Dic
     return None
 
 
+def _memory_usage_badge(usage: Optional[Dict[str, Any]]) -> str:
+    """Inline badge shown next to each memory write key."""
+    if not usage:
+        return ""
+    score = float(usage.get("influence_score") or 0.0)
+    used = bool(usage.get("used_in_final_answer"))
+    if used and score >= 0.5:
+        return f"`✓ used (influence {score:.2f})`"
+    if used:
+        return f"`~ partially used (influence {score:.2f})`"
+    return "`✗ not cited in rationale`"
+
+
+def _render_memory_usage_panel(memory_usage: List[Dict[str, Any]]) -> None:
+    """
+    Show the per-(owner, key) usage table at the top of the Memory tab.
+
+    Renders as a sortable dataframe with columns: agent, key, read_by,
+    used_in_final_answer, influence_score. When the report carries no
+    usage records (older runs before the attribution pass existed) the
+    panel is silently skipped.
+    """
+    if not memory_usage:
+        return
+    rows = []
+    for u in memory_usage:
+        rows.append({
+            "agent": u.get("agent_id", ""),
+            "key":   u.get("key", ""),
+            "read_by": ", ".join(u.get("read_by", []) or []),
+            "used_in_final_answer": bool(u.get("used_in_final_answer")),
+            "influence_score": float(u.get("influence_score") or 0.0),
+        })
+    if not rows:
+        return
+    st.markdown("**Memory usage attribution** — which writes the Synthesizer cited in its rationale")
+    st.dataframe(
+        rows,
+        column_config={
+            "influence_score": st.column_config.ProgressColumn(
+                "influence_score",
+                help="Fraction of value tokens cited in the Synthesizer's rationale.",
+                min_value=0.0, max_value=1.0, format="%.2f",
+            ),
+            "used_in_final_answer": st.column_config.CheckboxColumn(
+                "used_in_final_answer",
+                help="True if any token from this value appears in the rationale.",
+            ),
+        },
+        hide_index=True,
+        use_container_width=True,
+    )
+    st.caption(
+        "Heuristic: substring match of value tokens against the rationale. "
+        "Empty / numeric-only values score 0.0 by construction."
+    )
+
+
 def render_memory_tab(
     memory_diffs: List[Dict[str, Any]],
     trajectory: List[Dict[str, Any]],
+    memory_usage: Optional[List[Dict[str, Any]]] = None,
 ) -> None:
     render_tab_summary("Memory", _summarize_memory(memory_diffs))
     if not memory_diffs:
@@ -1569,9 +2488,20 @@ def render_memory_tab(
         st.info("Memory activity recorded, but no writes.")
         return
 
+    # Render the per-key usage panel (read_by / used_in_final_answer /
+    # influence_score) above the raw write log, when attribution data is
+    # available on the accountability report.
+    _render_memory_usage_panel(memory_usage or [])
+
     by_agent: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
     for m in writes:
         by_agent[m.get("agent_id") or "unknown"].append(m)
+
+    # Index usage records by (agent_id, key) for inline lookup per write.
+    usage_index: Dict[tuple, Dict[str, Any]] = {
+        (u.get("agent_id"), u.get("key")): u
+        for u in (memory_usage or [])
+    }
 
     for agent_id, agent_writes in by_agent.items():
         agent_writes.sort(key=lambda m: m.get("timestamp", 0))
@@ -1579,8 +2509,10 @@ def render_memory_tab(
             for i, m in enumerate(agent_writes):
                 diff_id = m.get("diff_id", f"d{i}")
                 key = m.get("key", "?")
+                usage = usage_index.get((agent_id, key))
+                badge = _memory_usage_badge(usage)
                 st.markdown(
-                    f"**{i + 1}. `{key}`** · "
+                    f"**{i + 1}. `{key}`** {badge} · "
                     f"{_fmt_ts(m.get('timestamp', 0))} · "
                     f"diff_id `{diff_id[:8]}`"
                 )
@@ -1608,17 +2540,30 @@ def render_memory_tab(
                 # "clickable expander" with a toggle that reveals the event.
                 trig_id = m.get("triggered_by_event_id") or ""
                 if trig_id:
+                    event = _find_event(trajectory, trig_id)
+                    label_action = (
+                        (event or {}).get("action")
+                        or (event or {}).get("event_type")
+                        or "event"
+                    )
                     if st.toggle(
-                        f"🔗 Triggered by event `{trig_id[:8]}`",
+                        f"🔗 Linked to **{label_action}** · `{trig_id[:8]}`",
                         key=f"mem_trig_{diff_id}",
                     ):
-                        event = _find_event(trajectory, trig_id)
                         if event is None:
-                            st.caption("Triggering event not found in trajectory.")
+                            st.caption(
+                                "Triggering event id present but not found "
+                                "in this task's trajectory."
+                            )
                         else:
                             st.json(event)
                 else:
-                    st.caption("No triggering event linked.")
+                    st.caption(
+                        "⚠ outside_traced_action — this write fired with no "
+                        "trajectory event in scope. If the write came from "
+                        "agent code, wrap it in `self.traced_action(...)` "
+                        "so it's attributed to a specific action."
+                    )
 
                 st.divider()
 
@@ -1930,15 +2875,71 @@ def _event_has_tool_call(ev: Dict[str, Any], tool_call_id: str) -> bool:
     return tool_call_id in outcome
 
 
+def _render_faithfulness_panel(record: Dict[str, Any]) -> None:
+    """
+    Render the "Faithfulness Checks" panel inside the Accountability tab.
+
+    Each check (defined in `agentxai.ui.faithfulness_checks`) is a sanity
+    assertion over the stored XAI data — does the report's headline agree
+    with the underlying signals? Results are colour-coded: green check =
+    pass, yellow warning = questionable, red cross = failed, gray =
+    "Not enough data".
+    """
+    from agentxai.ui.faithfulness_checks import (
+        compute_faithfulness_checks,
+        summarize_check_results,
+    )
+
+    results = compute_faithfulness_checks(record)
+    if not results:
+        return
+    counts = summarize_check_results(results)
+
+    st.markdown("**Faithfulness Checks**")
+    st.caption(
+        f"✓ {counts['pass']} passed · "
+        f"⚠ {counts['warn']} flagged · "
+        f"✗ {counts['fail']} failed · "
+        f"⊘ {counts['skip']} insufficient data"
+    )
+
+    # Inline rendering — one row per check. We use raw HTML so the colour
+    # markers are tight against the explanation rather than wrapped in
+    # heavy st.success / st.warning / st.error boxes (which would make
+    # the panel dwarf the rest of the tab).
+    style_for = {
+        "pass": ("#06A77D", "✓"),
+        "warn": ("#F4A261", "⚠"),
+        "fail": ("#E63946", "✗"),
+        "skip": ("#888888", "⊘"),
+    }
+    for r in results:
+        color, icon = style_for.get(r.get("status", "skip"), ("#888888", "·"))
+        st.markdown(
+            f"<div style='padding:6px 0; border-bottom:1px solid #eee;'>"
+            f"<span style='color:{color}; font-weight:bold; font-size:1.05em; "
+            f"display:inline-block; width:1.4em;'>{icon}</span>"
+            f"<b>{r.get('name', '?')}</b> — "
+            f"<span style='color:#444;'>{r.get('explanation', '')}</span>"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+
+
 def render_accountability_tab(
     report: Optional[Dict[str, Any]],
     trajectory: List[Dict[str, Any]],
     tool_calls: List[Dict[str, Any]],
+    record: Optional[Dict[str, Any]] = None,
 ) -> None:
     render_tab_summary("Accountability", _summarize_accountability(report))
     if not report:
         st.info("No accountability report recorded for this task.")
         return
+
+    # Surface stale-report warnings BEFORE the headline explanation so
+    # users don't trust a fallback-marked root cause unconditionally.
+    _render_staleness_banner(report)
 
     explanation = report.get("one_line_explanation") or "—"
     correct = report.get("outcome_correct")
@@ -2043,6 +3044,12 @@ def render_accountability_tab(
         st.markdown("**Critical memory diffs**")
         st.write([d[:8] for d in critical_diffs])
 
+    # Faithfulness Checks — sanity assertions over the report. Rendered last
+    # so the existing layout above is unchanged for users with older records.
+    if record is not None:
+        st.divider()
+        _render_faithfulness_panel(record)
+
 
 # ---------------------------------------------------------------------------
 # Main
@@ -2111,13 +3118,16 @@ def main() -> None:
     with tabs[2]:
         render_tool_provenance_tab(tool_calls)
     with tabs[3]:
-        render_memory_tab(memory_diffs, trajectory)
+        memory_usage = (accountability_report or {}).get("memory_usage", []) or []
+        render_memory_tab(memory_diffs, trajectory, memory_usage)
     with tabs[4]:
         render_communication_tab(messages)
     with tabs[5]:
         render_causality_tab(causal_graph, trajectory, accountability_report)
     with tabs[6]:
-        render_accountability_tab(accountability_report, trajectory, tool_calls)
+        render_accountability_tab(
+            accountability_report, trajectory, tool_calls, record=record,
+        )
 
 
 if __name__ == "__main__":

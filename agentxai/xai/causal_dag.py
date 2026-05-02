@@ -36,19 +36,29 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from agentxai.data.schemas import CausalEdge, ToolUseEvent, TrajectoryEvent
 from agentxai.store.trajectory_store import TrajectoryStore
+from agentxai.xai.config import DEFAULT_CONFIG, XAIScoringConfig
 
 
 _log = logging.getLogger(__name__)
 
-_TEMPORAL_WEIGHT = 0.3
+# Backward-compat alias. Newly-written code should reach for
+# `self.config.temporal_edge_weight` instead.
+_TEMPORAL_WEIGHT: float = DEFAULT_CONFIG.temporal_edge_weight
 _TOOL_EVENT_TYPES = {"tool_start", "tool_end", "tool_call", "tool_use"}
 
 
 class CausalDAGBuilder:
     """Builds and persists the per-task causal DAG."""
 
-    def __init__(self, store: TrajectoryStore) -> None:
+    def __init__(
+        self,
+        store: TrajectoryStore,
+        config: Optional[XAIScoringConfig] = None,
+    ) -> None:
         self.store = store
+        # Scoring weights — defaults reproduce historical behaviour when
+        # `config` is None. See agentxai/xai/config.py.
+        self.config: XAIScoringConfig = config or DEFAULT_CONFIG
 
     # ------------------------------------------------------------------
     # Public API
@@ -99,7 +109,7 @@ class CausalDAGBuilder:
                     continue
                 self._add_or_upgrade_edge(
                     graph, a.event_id, b.event_id,
-                    weight=_TEMPORAL_WEIGHT,
+                    weight=self.config.temporal_edge_weight,
                     causal_type="contributory",
                 )
 
@@ -120,7 +130,14 @@ class CausalDAGBuilder:
                 continue
             weight = cf_deltas.get(m.message_id)
             if weight is None:
-                weight = 1.0 if m.acted_upon else 0.5
+                # Heuristic when no counterfactual run is logged for
+                # this message. The cf delta from the counterfactual_runs
+                # table always wins when present.
+                weight = (
+                    self.config.message_acted_upon_weight
+                    if m.acted_upon
+                    else self.config.message_ignored_weight
+                )
             self._add_or_upgrade_edge(
                 graph, src.event_id, tgt.event_id,
                 weight=float(weight), causal_type="direct",

@@ -6,12 +6,11 @@ an AgentMessage with acted_upon=False; the counterfactual engine later calls
 `mark_acted_upon(message_id, description)` when it determines that the
 message actually changed the receiver's behavior.
 
-`build_communication_graph(store, task_id)` returns a NetworkX directed
-multigraph with agents as nodes and one edge per message, carrying
-message_type / acted_upon / content as edge attributes. A MultiDiGraph is
-returned so multiple messages between the same pair of agents are preserved
-as distinct edges — MultiDiGraph is a subclass of DiGraph, so the declared
-`-> nx.DiGraph` return type still holds.
+`build_communication_graph(store, task_id)` returns a NetworkX
+``MultiDiGraph`` with agents as nodes and one edge per message,
+carrying message_type / acted_upon / content as edge attributes.
+A multi-graph is needed because two agents may exchange more than one
+message and each one is a distinct edge for accountability purposes.
 """
 
 from __future__ import annotations
@@ -92,14 +91,18 @@ class MessageLogger:
 def build_communication_graph(
     store: TrajectoryStore,
     task_id: str,
-) -> nx.DiGraph:
+) -> nx.MultiDiGraph:
     """
-    Build a directed (multi)graph of all messages for one task.
+    Build a directed multigraph of all messages for one task.
 
-    Nodes are agent_ids. Each message is one directed edge from sender to
-    receiver with attrs: message_id, message_type, acted_upon, content,
-    behavior_change_description, timestamp. Missing tasks return an empty
-    graph.
+    Nodes are agent_ids. Each message is one directed edge from sender
+    to receiver with attrs: message_id, message_type, acted_upon,
+    content, behavior_change_description, timestamp. Multiple messages
+    between the same agent pair produce multiple edges (hence the
+    MultiDiGraph). Missing tasks return an empty graph.
+
+    Note: `nx.MultiDiGraph` IS-A `nx.DiGraph`, so callers still expecting
+    a DiGraph keep working — but the return type now states the truth.
     """
     graph: nx.MultiDiGraph = nx.MultiDiGraph()
 

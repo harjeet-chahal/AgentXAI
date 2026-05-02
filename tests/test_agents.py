@@ -287,13 +287,22 @@ def test_synthesizer_reads_memories_and_returns_structured_diagnosis(store, logg
                     "C": "Aortic dissection", "D": "Pneumothorax"},
     })
 
-    # Return contract.
-    assert set(out.keys()) == {"final_diagnosis", "confidence",
-                               "differential", "rationale"}
+    # Return contract — the original four keys are still present (backward
+    # compat) plus the new option-level fields, all defaulting empty when
+    # the LLM doesn't supply them.
+    assert {"final_diagnosis", "confidence", "differential", "rationale",
+            "predicted_letter", "predicted_text",
+            "option_analysis", "supporting_evidence_ids"} <= set(out.keys())
     assert out["final_diagnosis"] == expected_payload["final_diagnosis"]
     assert out["confidence"] == pytest.approx(0.92)
     assert out["differential"] == expected_payload["differential"]
     assert out["rationale"] == expected_payload["rationale"]
+    # Old-shape response → predicted_text mirrors final_diagnosis,
+    # predicted_letter / option_analysis / supporting_evidence_ids stay empty.
+    assert out["predicted_text"] == expected_payload["final_diagnosis"]
+    assert out["predicted_letter"] == ""
+    assert out["option_analysis"] == []
+    assert out["supporting_evidence_ids"] == []
 
     # The result was written into the synthesizer's own memory.
     syn_mem = mem_logger.for_agent("synthesizer")
@@ -402,3 +411,447 @@ def test_orchestrator_routes_to_specialists_and_synthesizer(store, loggers):
     assert senders == ["specialist_a", "specialist_b"]
     for f in findings:
         assert f["type"] == "finding"
+
+
+# ---------------------------------------------------------------------------
+# Memory-write traceability (regression for "No triggering event linked")
+# ---------------------------------------------------------------------------
+
+def _writes_for(store: TrajectoryStore, agent_id: str):
+    """All MemoryDiff write rows owned by `agent_id` for the test task."""
+    return [
+        d for d in store.get_full_record(TASK_ID).xai_data.memory_diffs
+        if d.agent_id == agent_id and d.operation == "write"
+    ]
+
+
+def _event_by_id(store: TrajectoryStore, event_id: str):
+    for e in store.get_full_record(TASK_ID).xai_data.trajectory:
+        if e.event_id == event_id:
+            return e
+    return None
+
+
+class TestMemoryWriteTraceability:
+    """
+    Every MemoryDiff produced inside an agent's traced action must carry a
+    `triggered_by_event_id` pointing at the enclosing TrajectoryEvent.
+
+    Before the fix: the writes in `summarize_findings` happened *before*
+    `log_action(...)` was called, so the contextvar was empty and every
+    diff landed with `triggered_by_event_id=""`. The fix wraps the writes
+    in `traced_action(...)` so the event is created first and the
+    contextvar is set for the lifetime of the block.
+    """
+
+    def test_specialist_a_writes_link_to_summarize_findings_event(self, store, loggers):
+        agent = SpecialistA(
+            agent_id="specialist_a",
+            symptom_lookup_fn=lambda s: {"related_conditions": [("MI", 0.5)]},
+            severity_scorer_fn=lambda syms: 0.5,
+            orchestrator_id="orchestrator",
+            llm=_fake_llm(["chest pain"]),
+            **loggers,
+        )
+        agent.run({"patient_case": CASE_TEXT})
+
+        writes = _writes_for(store, "specialist_a")
+        keys = {w.key for w in writes}
+        # All four canonical keys must be present...
+        assert keys == {
+            "symptom_patterns", "severity_score",
+            "top_conditions", "confidence",
+        }
+        # ...and every one must point at a real summarize_findings event.
+        for w in writes:
+            assert w.triggered_by_event_id, (
+                f"specialist_a write {w.key!r} is unlinked "
+                f"(triggered_by_event_id is empty)"
+            )
+            event = _event_by_id(store, w.triggered_by_event_id)
+            assert event is not None, (
+                f"specialist_a write {w.key!r} points at "
+                f"{w.triggered_by_event_id!r} which does not exist in trajectory"
+            )
+            assert event.action == "summarize_findings"
+            assert event.agent_id == "specialist_a"
+
+        # All four writes share the same event_id (one summarize_findings event).
+        assert len({w.triggered_by_event_id for w in writes}) == 1
+
+    def test_specialist_b_writes_link_to_summarize_findings_event(self, store, loggers):
+        fake_docs = [
+            {"doc_id": "d1", "text": "evidence one", "score": 0.8,
+             "source_file": "x.txt"},
+        ]
+        agent = SpecialistB(
+            agent_id="specialist_b",
+            pubmed_search_fn=lambda case, k: fake_docs,
+            guideline_lookup_fn=lambda c: {"match": "MI"},
+            orchestrator_id="orchestrator",
+            llm=_fake_llm(["Acute MI"]),
+            **loggers,
+        )
+        agent.run({"patient_case": CASE_TEXT})
+
+        writes = _writes_for(store, "specialist_b")
+        keys = {w.key for w in writes}
+        assert keys == {
+            "retrieved_docs", "top_evidence",
+            "guideline_matches", "retrieval_confidence",
+        }
+        for w in writes:
+            assert w.triggered_by_event_id, (
+                f"specialist_b write {w.key!r} is unlinked"
+            )
+            event = _event_by_id(store, w.triggered_by_event_id)
+            assert event is not None
+            assert event.action == "summarize_findings"
+            assert event.agent_id == "specialist_b"
+
+        assert len({w.triggered_by_event_id for w in writes}) == 1
+
+    def test_synthesizer_final_output_links_to_synthesize_diagnosis_event(self, store, loggers):
+        # Pre-seed specialist memory so the Synthesizer has something to read.
+        # Use _emit-bypassing dict access (super().__setitem__) — but the
+        # production path here does want LoggedMemory to log seeded values
+        # too, so just use the public API. Those seed-writes WILL link to
+        # whatever happens to be in current_event_id at the time, which is
+        # fine for this test (we only assert the synthesizer's own write).
+        mem_logger: MemoryLogger = loggers["memory_logger"]
+        mem_logger.for_agent("specialist_a")["symptom_patterns"] = ["x"]
+        mem_logger.for_agent("specialist_b")["top_evidence"] = []
+
+        agent = Synthesizer(
+            agent_id="synthesizer",
+            specialist_a_id="specialist_a",
+            specialist_b_id="specialist_b",
+            llm=_fake_llm({
+                "final_diagnosis": "MI",
+                "confidence": 0.9,
+                "differential": [],
+                "rationale": "MI fits.",
+            }),
+            **loggers,
+        )
+        agent.run({"patient_case": CASE_TEXT, "options": {}})
+
+        writes = _writes_for(store, "synthesizer")
+        # Synthesizer writes exactly one key during run() — final_output.
+        final_writes = [w for w in writes if w.key == "final_output"]
+        assert len(final_writes) == 1
+        w = final_writes[0]
+        assert w.triggered_by_event_id, "final_output write is unlinked"
+        event = _event_by_id(store, w.triggered_by_event_id)
+        assert event is not None
+        assert event.action == "synthesize_diagnosis"
+        assert event.agent_id == "synthesizer"
+
+    def test_traced_action_resets_contextvar_on_exit(self, store, loggers):
+        """
+        After a traced_action block exits, the contextvar must be reset so
+        any subsequent untraced write lands "outside_traced_action" rather
+        than spuriously linking to the just-finished event.
+        """
+        from agentxai.xai.memory_logger import current_event_id
+
+        agent = SpecialistA(
+            agent_id="specialist_a",
+            symptom_lookup_fn=lambda s: {"related_conditions": []},
+            severity_scorer_fn=lambda syms: 0.0,
+            orchestrator_id="orchestrator",
+            llm=_fake_llm([]),
+            **loggers,
+        )
+        # Inside the run, log_action sets the contextvar to whatever was
+        # most recent. After run() returns, run-scoped state is unwound.
+        agent.run({"patient_case": ""})
+        # Contextvar isn't reset by the agent leaving scope (it's a global),
+        # but a write performed *now* — outside any active traced_action —
+        # would attribute to whatever the last action set it to. We
+        # explicitly clear it to simulate a fresh, untraced write context.
+        current_event_id.set("")
+        mem = loggers["memory_logger"].for_agent("specialist_a")
+        mem["adhoc_key"] = "adhoc_value"
+        all_writes = _writes_for(store, "specialist_a")
+        adhoc = [w for w in all_writes if w.key == "adhoc_key"]
+        assert len(adhoc) == 1
+        # No event links — the dashboard renders this as
+        # "outside_traced_action".
+        assert adhoc[0].triggered_by_event_id == ""
+
+    def test_no_diffs_carry_unknown_event_ids(self, store, loggers):
+        """
+        Sweep: across A, B, and Synth, every non-empty triggered_by_event_id
+        on a write diff must resolve to a real TrajectoryEvent in the same
+        task. Catches the "linked but stale id" failure mode separately
+        from the "unlinked" one.
+        """
+        agent_a = SpecialistA(
+            agent_id="specialist_a",
+            symptom_lookup_fn=lambda s: {"related_conditions": [("MI", 0.5)]},
+            severity_scorer_fn=lambda syms: 0.5,
+            orchestrator_id="orchestrator",
+            llm=_fake_llm(["chest pain"]),
+            **loggers,
+        )
+        agent_b = SpecialistB(
+            agent_id="specialist_b",
+            pubmed_search_fn=lambda case, k: [
+                {"doc_id": "d1", "text": "ev", "score": 0.5, "source_file": "x.txt"},
+            ],
+            guideline_lookup_fn=lambda c: {"match": "MI"},
+            orchestrator_id="orchestrator",
+            llm=_fake_llm(["MI"]),
+            **loggers,
+        )
+        agent_a.run({"patient_case": CASE_TEXT})
+        agent_b.run({"patient_case": CASE_TEXT})
+
+        record = store.get_full_record(TASK_ID)
+        event_ids = {e.event_id for e in record.xai_data.trajectory}
+        for d in record.xai_data.memory_diffs:
+            if d.operation != "write":
+                continue
+            if not d.triggered_by_event_id:
+                continue   # explicitly outside_traced_action — fine
+            assert d.triggered_by_event_id in event_ids, (
+                f"diff for {d.agent_id}/{d.key} references missing event "
+                f"{d.triggered_by_event_id!r}"
+            )
+
+
+# ---------------------------------------------------------------------------
+# Synthesizer option-level reasoning
+# ---------------------------------------------------------------------------
+
+# A representative HIV confirmatory-testing question. Option C is the
+# correct modern answer per CDC algorithm; "Western blot" (option A) is
+# the older test the LLM is sometimes anchored on. The fake LLM payload
+# below exercises the case where the model picks C correctly AND
+# produces option_analysis that explicitly downgrades the Western blot
+# option — i.e., the rationale-vs-pick alignment the new prompt enforces.
+_HIV_OPTIONS = {
+    "A": "Western blot",
+    "B": "Repeat HIV antibody screening test in 6 months",
+    "C": "HIV-1/HIV-2 antibody differentiation immunoassay",
+    "D": "p24 antigen",
+    "E": "HIV RNA viral load",
+}
+
+
+class TestSynthesizerOptionLevelReasoning:
+    """End-to-end coverage of the new option_analysis / predicted_letter contract."""
+
+    def _hiv_payload(self) -> Dict[str, Any]:
+        """Reference HIV LLM payload covering every required new field."""
+        return {
+            "predicted_letter": "C",
+            "predicted_text":   _HIV_OPTIONS["C"],
+            "final_diagnosis":  _HIV_OPTIONS["C"],
+            "confidence":       0.91,
+            "differential":     [_HIV_OPTIONS["A"], _HIV_OPTIONS["E"]],
+            "rationale": (
+                "Per the current CDC HIV testing algorithm a reactive screening "
+                "immunoassay is followed by an HIV-1/HIV-2 antibody "
+                "differentiation immunoassay (option C) — Western blot was "
+                "phased out in 2014. Option C also distinguishes HIV-1 from "
+                "HIV-2, which neither RNA viral load (option E) nor a repeat "
+                "screen (option B) does."
+            ),
+            "option_analysis": [
+                {"letter": "A", "text": _HIV_OPTIONS["A"], "verdict": "incorrect",
+                 "reason": "Western blot is no longer the recommended confirmatory test."},
+                {"letter": "B", "text": _HIV_OPTIONS["B"], "verdict": "incorrect",
+                 "reason": "Delays diagnosis; not the next step after a reactive screen."},
+                {"letter": "C", "text": _HIV_OPTIONS["C"], "verdict": "correct",
+                 "reason": "Standard confirmatory step in the current CDC algorithm."},
+                {"letter": "D", "text": _HIV_OPTIONS["D"], "verdict": "partial",
+                 "reason": "Useful for acute HIV but not the confirmatory step."},
+                {"letter": "E", "text": _HIV_OPTIONS["E"], "verdict": "incorrect",
+                 "reason": "Reserved for indeterminate differentiation results."},
+            ],
+            "supporting_evidence_ids": ["Harrison__0341", "FA__step1_HIV"],
+        }
+
+    def test_full_payload_round_trips_through_synthesizer(self, store, loggers):
+        """
+        Fixed fake LLM response → all eight contract keys parsed and the
+        full structured option_analysis is preserved verbatim through the
+        Synthesizer's normalisation.
+        """
+        # Pre-seed both specialist memories so the read step has content.
+        loggers["memory_logger"].for_agent("specialist_a")["top_conditions"] = []
+        loggers["memory_logger"].for_agent("specialist_b")["top_evidence"] = []
+
+        payload = self._hiv_payload()
+        agent = Synthesizer(
+            agent_id="synthesizer",
+            specialist_a_id="specialist_a",
+            specialist_b_id="specialist_b",
+            llm=_fake_llm(payload),
+            **loggers,
+        )
+        out = agent.run({"patient_case": "HIV stem", "options": _HIV_OPTIONS})
+
+        assert out["predicted_letter"] == "C"
+        assert out["predicted_text"] == _HIV_OPTIONS["C"]
+        assert out["final_diagnosis"] == _HIV_OPTIONS["C"]
+        assert out["confidence"] == pytest.approx(0.91)
+        # Option analysis is structured, sorted by letter, with one entry per option.
+        analysis = out["option_analysis"]
+        assert [e["letter"] for e in analysis] == ["A", "B", "C", "D", "E"]
+        assert {e["verdict"] for e in analysis} == {"correct", "incorrect", "partial"}
+        # The specific HIV regression: Western blot must be flagged INCORRECT,
+        # not casually mentioned as "the confirmatory test".
+        wb = next(e for e in analysis if e["letter"] == "A")
+        assert wb["verdict"] == "incorrect"
+        assert "no longer" in wb["reason"].lower() or "phased" in wb["reason"].lower()
+        # Supporting evidence ids preserved verbatim.
+        assert out["supporting_evidence_ids"] == ["Harrison__0341", "FA__step1_HIV"]
+
+        # Persisted on the synthesizer's own memory under final_output.
+        assert loggers["memory_logger"].for_agent("synthesizer")["final_output"] == out
+
+    def test_predicted_letter_backfills_from_option_analysis_when_missing(
+        self, store, loggers,
+    ):
+        """
+        If the LLM forgets to emit `predicted_letter` but DID mark one
+        option as `correct` in option_analysis, the parser backfills.
+        """
+        loggers["memory_logger"].for_agent("specialist_a")["x"] = "y"
+        loggers["memory_logger"].for_agent("specialist_b")["x"] = "y"
+
+        payload = self._hiv_payload()
+        del payload["predicted_letter"]
+        del payload["predicted_text"]
+        del payload["final_diagnosis"]
+
+        agent = Synthesizer(
+            agent_id="synthesizer",
+            specialist_a_id="specialist_a",
+            specialist_b_id="specialist_b",
+            llm=_fake_llm(payload),
+            **loggers,
+        )
+        out = agent.run({"patient_case": "HIV stem", "options": _HIV_OPTIONS})
+        assert out["predicted_letter"] == "C"
+        assert out["predicted_text"] == _HIV_OPTIONS["C"]
+        assert out["final_diagnosis"] == _HIV_OPTIONS["C"]
+
+    def test_malformed_option_analysis_entries_are_dropped_not_rejected(
+        self, store, loggers,
+    ):
+        """A bad entry in option_analysis must not nuke the whole field."""
+        loggers["memory_logger"].for_agent("specialist_a")["x"] = "y"
+        loggers["memory_logger"].for_agent("specialist_b")["x"] = "y"
+
+        payload = self._hiv_payload()
+        # Inject garbage entries: not a dict, missing letter, bogus verdict,
+        # duplicate letter (should keep the first occurrence).
+        payload["option_analysis"] = [
+            "not a dict",
+            {"letter": "?", "verdict": "correct"},          # bad letter
+            {"text": "no letter", "verdict": "correct"},    # missing letter
+            {"letter": "A", "text": _HIV_OPTIONS["A"],
+             "verdict": "correct", "reason": "ok"},
+            {"letter": "A", "text": "duplicate", "verdict": "incorrect",
+             "reason": "should be ignored"},
+            {"letter": "B", "text": _HIV_OPTIONS["B"],
+             "verdict": "weird-verdict", "reason": "blank verdict"},
+        ]
+        # Drop predicted_letter so the option_analysis backfill kicks in too.
+        del payload["predicted_letter"]
+        del payload["predicted_text"]
+        del payload["final_diagnosis"]
+
+        agent = Synthesizer(
+            agent_id="synthesizer",
+            specialist_a_id="specialist_a",
+            specialist_b_id="specialist_b",
+            llm=_fake_llm(payload),
+            **loggers,
+        )
+        out = agent.run({"patient_case": "HIV", "options": _HIV_OPTIONS})
+
+        analysis = out["option_analysis"]
+        letters = [e["letter"] for e in analysis]
+        assert letters == ["A", "B"], (
+            f"only the two valid entries should survive; got {letters}"
+        )
+        # Duplicate "A" dropped — first occurrence wins.
+        a = next(e for e in analysis if e["letter"] == "A")
+        assert a["text"] == _HIV_OPTIONS["A"]
+        # Bogus verdict normalised to empty string, not raised.
+        b = next(e for e in analysis if e["letter"] == "B")
+        assert b["verdict"] == ""
+        # Backfill still found a "correct" entry → predicted_letter populated.
+        assert out["predicted_letter"] == "A"
+
+    def test_legacy_four_key_response_still_parses(self, store, loggers):
+        """
+        Backward-compat regression: an old-shape response (no predicted_*,
+        no option_analysis, no supporting_evidence_ids) still produces a
+        complete eight-key output with empty defaults.
+        """
+        loggers["memory_logger"].for_agent("specialist_a")["x"] = "y"
+        loggers["memory_logger"].for_agent("specialist_b")["x"] = "y"
+
+        legacy = {
+            "final_diagnosis": "Acute MI",
+            "confidence":      0.8,
+            "differential":    ["PE"],
+            "rationale":       "Old-shape rationale.",
+        }
+        agent = Synthesizer(
+            agent_id="synthesizer",
+            specialist_a_id="specialist_a",
+            specialist_b_id="specialist_b",
+            llm=_fake_llm(legacy),
+            **loggers,
+        )
+        out = agent.run({"patient_case": "x", "options": {"A": "Acute MI", "B": "PE"}})
+
+        assert out["final_diagnosis"] == "Acute MI"
+        # predicted_text mirrors final_diagnosis on legacy responses.
+        assert out["predicted_text"] == "Acute MI"
+        # No structured letter pick when LLM didn't supply one.
+        assert out["predicted_letter"] == ""
+        assert out["option_analysis"] == []
+        assert out["supporting_evidence_ids"] == []
+
+    def test_prompt_includes_option_level_instructions(self, store, loggers):
+        """
+        The new prompt must explicitly instruct the LLM to (a) ground in
+        the listed options, (b) downgrade outdated knowledge, and (c)
+        produce option_analysis. Catches regressions where someone
+        truncates the prompt back to the old four-key contract.
+        """
+        loggers["memory_logger"].for_agent("specialist_a")["x"] = "y"
+        loggers["memory_logger"].for_agent("specialist_b")["x"] = "y"
+
+        llm = _fake_llm({"predicted_letter": "A", "predicted_text": "Test"})
+        agent = Synthesizer(
+            agent_id="synthesizer",
+            specialist_a_id="specialist_a",
+            specialist_b_id="specialist_b",
+            llm=llm,
+            **loggers,
+        )
+        agent.run({"patient_case": "x", "options": {"A": "Test"}})
+
+        prompt = llm.invoke.call_args.args[0]
+        # Schema-level: every new key is named in the contract block.
+        for key in (
+            "predicted_letter",
+            "predicted_text",
+            "option_analysis",
+            "supporting_evidence_ids",
+        ):
+            assert key in prompt, f"prompt missing required field {key!r}"
+        # Behaviour-level: the option-grounding rule is explicit.
+        prompt_low = prompt.lower()
+        assert "do not recommend" in prompt_low or "not listed" in prompt_low
+        assert "older guideline" in prompt_low or "defer to the listed" in prompt_low
+        assert "verdict" in prompt_low

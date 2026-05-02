@@ -1,15 +1,32 @@
 """
-pubmed_search tool — top-k evidence retrieval over a local FAISS index.
+``pubmed_search`` tool — local textbook FAISS retrieval (NOT real PubMed).
 
-NOTE: We do not have a real PubMed corpus checked into this project. As a
-substitute evidence source, we query the textbook FAISS index built by
-``agentxai.data.build_knowledge_base.build_textbook_index`` (18 English medical
-textbooks, all-MiniLM-L6-v2 embeddings, cosine via L2-normalised inner-product).
-The function name is kept as ``pubmed_search`` so downstream agents can swap in
-a real PubMed index later without touching the call sites.
+What this actually does
+-----------------------
+Despite the name, this tool DOES NOT query the PubMed/NCBI API. It runs a
+top-k semantic search over a local FAISS index built from 18 English
+medical textbooks (Harrison, Robbins, First Aid, etc.) — see
+``agentxai.data.build_knowledge_base.build_textbook_index``. Embeddings
+are ``all-MiniLM-L6-v2``; similarity is cosine via L2-normalised inner
+product on a ``faiss.IndexFlatIP``.
 
-Returns a list of {doc_id, text, score, source_file}, ordered by descending
-similarity to the query.
+Why the name stays
+------------------
+The function name is preserved as a stable integration point: every agent
+call site, every stored ``tool_name="pubmed_search"`` row in
+``tool_use_events``, and every test that mocks the tool refer to this
+identifier. Renaming would break those references for no semantic gain.
+The dashboard surfaces this honestly via a display alias
+(`pubmed_search (local textbook FAISS)`); see
+`agentxai/ui/dashboard.py::_tool_display_name`. To swap in a real PubMed
+index later, replace the body of ``pubmed_search`` (or inject a
+different ``pubmed_search_fn`` into SpecialistB) without changing any
+caller.
+
+Returns
+-------
+List of ``{doc_id, text, score, source_file}`` dicts, ordered by
+descending similarity to the query.
 """
 
 from __future__ import annotations
@@ -75,8 +92,12 @@ _DEFAULT_LOGGER  = ToolProvenanceLogger(store=_DEFAULT_STORE, task_id=_DEFAULT_T
 @traced_tool(_DEFAULT_LOGGER, called_by="default", tool_name="pubmed_search")
 def pubmed_search(query: str, k: int = 5) -> List[dict]:
     """
-    Retrieve the top-*k* most semantically similar passages to *query* from
-    the local textbook FAISS index (used as a stand-in for PubMed).
+    Retrieve the top-*k* most semantically similar passages to *query*.
+
+    NOTE: This searches a **local FAISS index over 18 medical textbooks**,
+    not the PubMed API. The name is preserved for backward compatibility
+    with stored tool-call records and call sites; see this module's
+    docstring for the full rationale and the swap-in path.
 
     Returns
     -------
@@ -117,8 +138,11 @@ def pubmed_search(query: str, k: int = 5) -> List[dict]:
 pubmed_search_tool = Tool(
     name="pubmed_search",
     description=(
-        "Retrieve top-k semantically similar passages from a local medical "
-        "textbook FAISS index (used as a substitute for a PubMed index)."
+        "Top-k semantic search over a LOCAL medical-textbook FAISS index "
+        "(18 English textbooks, all-MiniLM-L6-v2 embeddings). Despite the "
+        "name, this is NOT the PubMed/NCBI API — the name is preserved as "
+        "a stable integration point for legacy call sites and stored "
+        "records. Returns: list of {doc_id, text, score, source_file}."
     ),
     func=pubmed_search,
 )

@@ -360,9 +360,12 @@ class TestAccountabilityReport:
         d = self._make().to_dict()
         expected = {
             "task_id", "final_outcome", "outcome_correct",
-            "agent_responsibility_scores", "root_cause_event_id", "causal_chain",
+            "agent_responsibility_scores", "root_cause_event_id",
+            "root_cause_reason", "causal_chain",
             "most_impactful_tool_call_id", "critical_memory_diffs",
-            "most_influential_message_id", "plan_deviation_summary", "one_line_explanation",
+            "most_influential_message_id", "plan_deviation_summary",
+            "one_line_explanation", "memory_usage",
+            "evidence_used_by_final_answer", "most_supportive_evidence_ids",
         }
         assert set(d.keys()) == expected
 

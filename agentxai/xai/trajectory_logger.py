@@ -152,11 +152,76 @@ class TrajectoryLogger(_LCBase):
 
 
 def _to_jsonable(value: Any) -> Any:
-    """Coerce LangChain's message/output objects to something JSON-serializable."""
+    """
+    Coerce LangChain's message/output objects to something JSON-serializable.
+
+    Handles the common Python container types in-place. For non-trivial
+    leaf objects we try, in order:
+
+      1. ``dataclasses.asdict`` — covers every AgentXAI schema dataclass.
+      2. Pydantic v2 ``.model_dump()`` and v1 ``.dict()`` — covers
+         LangChain's BaseMessage subclasses and the API response models.
+      3. ``__json__`` / ``to_dict`` convention — for objects that
+         deliberately expose a JSON projection.
+      4. Structured fallback ``{"__type__": "<ClassName>", "repr": "..."}``
+         — preserves the type name for forensic value instead of
+         silently dropping it into an opaque ``str(obj)`` blob.
+
+    The structured fallback was the headline fix here: previous code
+    coerced every unknown value with ``str(value)``, so a complex object
+    like ``<MyClass object at 0x...>`` was stored verbatim, which is
+    indistinguishable from a real string and can't be inspected later.
+    """
+    import dataclasses
+
     if isinstance(value, (str, int, float, bool)) or value is None:
         return value
     if isinstance(value, dict):
-        return {k: _to_jsonable(v) for k, v in value.items()}
-    if isinstance(value, (list, tuple)):
+        return {str(k): _to_jsonable(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set, frozenset)):
         return [_to_jsonable(v) for v in value]
-    return str(value)
+
+    # 1. Dataclasses (AgentXAI schemas, plus anything user-defined).
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        try:
+            return _to_jsonable(dataclasses.asdict(value))
+        except Exception:
+            pass  # fall through to next strategy
+
+    # 2. Pydantic — v2 first, then v1. LangChain Messages and the
+    #    API response models both use one of these.
+    dump = getattr(value, "model_dump", None)
+    if callable(dump):
+        try:
+            return _to_jsonable(dump())
+        except Exception:
+            pass
+    legacy_dump = getattr(value, "dict", None)
+    if callable(legacy_dump):
+        try:
+            out = legacy_dump()
+            if isinstance(out, dict):
+                return _to_jsonable(out)
+        except Exception:
+            pass
+
+    # 3. Convention helpers some objects expose.
+    for attr in ("__json__", "to_dict"):
+        fn = getattr(value, attr, None)
+        if callable(fn):
+            try:
+                out = fn()
+                # Only honor the result when it's already JSON-shaped.
+                if isinstance(out, (dict, list, str, int, float, bool)) or out is None:
+                    return _to_jsonable(out)
+            except Exception:
+                pass
+
+    # 4. Structured fallback. Preserves type name for forensic value;
+    #    truncates the repr so a giant object doesn't blow up the JSON
+    #    column.
+    type_name = f"{type(value).__module__}.{type(value).__name__}"
+    raw_repr = repr(value)
+    if len(raw_repr) > 240:
+        raw_repr = raw_repr[:237] + "..."
+    return {"__type__": type_name, "repr": raw_repr}

@@ -18,7 +18,6 @@ import argparse
 import json
 import math
 import pathlib
-import sqlite3
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
 
@@ -49,42 +48,48 @@ def _mean_std(values: List[float]) -> Tuple[float, float]:
 # ---------------------------------------------------------------------------
 
 def _load_counts(db_path: pathlib.Path) -> Dict[str, int]:
-    """Return {status: count} across all rows in manual_reviews."""
+    """
+    Return {status: count} across both manual_reviews tables.
+
+    Uses the TrajectoryStore so v2 (ORM-managed) takes precedence and
+    legacy `manual_reviews` rows are folded in only when their
+    medqa_task_id isn't already covered by v2.
+    """
     if not db_path.exists():
         return {}
-    conn = sqlite3.connect(str(db_path))
-    conn.row_factory = sqlite3.Row
-    try:
-        cur = conn.execute(
-            "SELECT status, COUNT(*) AS cnt FROM manual_reviews GROUP BY status"
-        )
-        return {row["status"]: row["cnt"] for row in cur.fetchall()}
-    except sqlite3.OperationalError:
-        return {}
-    finally:
-        conn.close()
+    from agentxai.store.trajectory_store import TrajectoryStore
+    store = TrajectoryStore(db_url=f"sqlite:///{db_path}")
+    counts: Dict[str, int] = {}
+    for r in store.list_manual_reviews(include_legacy=True):
+        s = r.get("status") or ""
+        counts[s] = counts.get(s, 0) + 1
+    return counts
 
 
 def load_reviewed_rows(db_path: pathlib.Path) -> List[Dict]:
-    """Return all rows with status='reviewed'."""
+    """
+    Return all `status='reviewed'` rows from BOTH the v2 ORM-managed
+    table and the legacy `manual_reviews` table (v2 wins on conflict).
+
+    Rows are normalised to a single dict shape — see
+    ``TrajectoryStore.list_manual_reviews`` for the keys. The legacy
+    rows carry ``"source": "legacy"`` so consumers can tell them apart;
+    v2 rows carry ``"source": "v2"``.
+    """
     if not db_path.exists():
         raise FileNotFoundError(
             f"Database not found: {db_path}\n"
             "Run the review tool first to generate ratings."
         )
-    conn = sqlite3.connect(str(db_path))
-    conn.row_factory = sqlite3.Row
-    try:
-        cur = conn.execute(
-            "SELECT * FROM manual_reviews WHERE status='reviewed' ORDER BY reviewed_at"
-        )
-        return [dict(row) for row in cur.fetchall()]
-    except sqlite3.OperationalError as exc:
+    from agentxai.store.trajectory_store import TrajectoryStore
+    store = TrajectoryStore(db_url=f"sqlite:///{db_path}")
+    rows = store.list_manual_reviews(status="reviewed", include_legacy=True)
+    if not rows:
         raise RuntimeError(
-            "manual_reviews table not found — run the review tool first."
-        ) from exc
-    finally:
-        conn.close()
+            "No reviewed rows found in either manual_reviews_v2 or "
+            "the legacy manual_reviews table — run the review tool first."
+        )
+    return rows
 
 
 # ---------------------------------------------------------------------------

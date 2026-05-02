@@ -183,6 +183,43 @@ class CausalEdge:
 
 
 # ---------------------------------------------------------------------------
+# Memory usage attribution (consumed by Pillar 7)
+# ---------------------------------------------------------------------------
+
+@dataclass(kw_only=True)
+class MemoryUsage:
+    """
+    Per-(owner, key) record of how a memory write was consumed downstream.
+
+    `read_by` lists the agent_ids that accessed this key (in the current
+    pipeline, the Synthesizer reads every specialist key — captured via the
+    `read_specialist_memories` trajectory event rather than per-key reads).
+    `used_in_final_answer` and `influence_score` come from the heuristic in
+    `agentxai/xai/memory_usage.py`, which substring-matches the value's
+    leaf tokens against the Synthesizer's rationale.
+    """
+
+    agent_id: str = ""
+    key: str = ""
+    read_by: List[str] = field(default_factory=list)
+    used_in_final_answer: bool = False
+    influence_score: float = 0.0   # 0–1 fraction of value tokens cited
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> "MemoryUsage":
+        return cls(
+            agent_id=d.get("agent_id", ""),
+            key=d.get("key", ""),
+            read_by=list(d.get("read_by", [])),
+            used_in_final_answer=bool(d.get("used_in_final_answer", False)),
+            influence_score=float(d.get("influence_score", 0.0)),
+        )
+
+
+# ---------------------------------------------------------------------------
 # Pillar 7 — System-Wide Accountability
 # ---------------------------------------------------------------------------
 
@@ -195,19 +232,49 @@ class AccountabilityReport:
     outcome_correct: bool = False
     agent_responsibility_scores: Dict[str, float] = field(default_factory=dict)
     root_cause_event_id: str = ""
+    # Short human-readable rationale for *why* `root_cause_event_id` was
+    # selected (e.g., "pubmed_search from specialist_b: high-impact tool
+    # (0.85), acted-upon message"). Empty string means the field was not
+    # populated (e.g., older records produced before the selector logged it).
+    root_cause_reason: str = ""
     causal_chain: List[str] = field(default_factory=list)   # ordered event_ids
     most_impactful_tool_call_id: str = ""
     critical_memory_diffs: List[str] = field(default_factory=list)   # diff_ids
     most_influential_message_id: str = ""
     plan_deviation_summary: str = ""
     one_line_explanation: str = ""
+    # Per-(owner, key) attribution computed by the heuristic in
+    # `agentxai/xai/memory_usage.py`. Empty for older records produced
+    # before the attribution pass existed.
+    memory_usage: List[MemoryUsage] = field(default_factory=list)
+    # Evidence ids the final rationale actually used — verbatim copy of
+    # `system_output["supporting_evidence_ids"]`, surfaced on the
+    # accountability report so callers don't need to also fetch
+    # system_output. Falls back to heuristic inference in run_pipeline
+    # when the Synthesizer didn't supply explicit citations.
+    evidence_used_by_final_answer: List[str] = field(default_factory=list)
+    # Top evidence ids ranked by how supportive they are of the final
+    # answer (cited-in-rationale beats uncited; ties broken by FAISS
+    # retrieval score). May include high-quality docs the rationale did
+    # NOT explicitly cite — the gap with `evidence_used_by_final_answer`
+    # is itself a faithfulness signal.
+    most_supportive_evidence_ids: List[str] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
+        # asdict recurses into the nested MemoryUsage dataclasses so the
+        # produced dict is JSON-safe end to end.
         return asdict(self)
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "AccountabilityReport":
-        return cls(**d)
+        # Strip and rebuild memory_usage so a list of plain dicts (typical
+        # for already-serialized records) is rehydrated to dataclasses.
+        data = dict(d)
+        usage_raw = data.pop("memory_usage", [])
+        return cls(
+            **data,
+            memory_usage=[MemoryUsage.from_dict(u) for u in usage_raw],
+        )
 
 
 # ---------------------------------------------------------------------------

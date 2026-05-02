@@ -395,9 +395,12 @@ class TestRunTask:
 
 class TestCORS:
     def test_allows_streamlit_origin(self, client):
+        # The default allow-list now includes localhost:8501 explicitly
+        # (instead of the old wildcard), so the response echoes the
+        # origin verbatim — which is actually CORS-correct behaviour.
         r = client.get("/tasks", headers={"Origin": "http://localhost:8501"})
         assert r.status_code == 200
-        assert r.headers.get("access-control-allow-origin") == "*"
+        assert r.headers.get("access-control-allow-origin") == "http://localhost:8501"
 
     def test_preflight_allows_any_method(self, client):
         r = client.options(
@@ -409,5 +412,8 @@ class TestCORS:
             },
         )
         assert r.status_code == 200
-        assert r.headers.get("access-control-allow-origin") == "*"
+        # Default allow-list explicitly enumerates localhost:8501; the
+        # CORS response echoes it. (Wildcard mode is opt-in via
+        # AGENTXAI_ALLOW_CORS_ALL=true and tested in test_api_security.py.)
+        assert r.headers.get("access-control-allow-origin") == "http://localhost:8501"
         assert "POST" in r.headers.get("access-control-allow-methods", "")

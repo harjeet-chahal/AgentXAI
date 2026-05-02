@@ -46,5 +46,5 @@ api:           ## Start the FastAPI backend on API_HOST:API_PORT
 dashboard:     ## Launch the Streamlit dashboard (requires api to be running)
 	streamlit run agentxai/ui/dashboard.py
 
-review:        ## Open the manual review page directly
-	streamlit run agentxai/ui/pages/review.py
+review:        ## Open the manual review page directly (hidden from main dashboard nav)
+	streamlit run agentxai/ui/disabled_pages/review.py

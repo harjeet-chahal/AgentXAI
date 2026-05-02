@@ -4,7 +4,9 @@ Manual XAI quality review page — Streamlit multi-page app.
 Cycles through the 500 manual-review records (deterministic split, seed=42),
 showing the patient case, ground truth, system output, accountability report,
 causal chain, and one-line explanation for each.  Collects four 1–5 ratings
-plus free-text notes and writes them to the manual_reviews SQLite table.
+plus free-text notes and writes them via ``TrajectoryStore.save_manual_review``
+to the ORM-managed ``manual_reviews_v2`` table — keyed by the stable MedQA
+record id and soft-linked to the most recent pipeline run when one exists.
 
 Run alongside the main dashboard:
     streamlit run agentxai/ui/dashboard.py
@@ -14,7 +16,6 @@ from __future__ import annotations
 
 import json
 import pathlib
-import sqlite3
 import sys
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -27,72 +28,80 @@ import streamlit as st
 # ---------------------------------------------------------------------------
 
 _ROOT = pathlib.Path(__file__).resolve().parents[3]   # project root
-_DB_PATH = _ROOT / "agentxai" / "data" / "agentxai.db"
 sys.path.insert(0, str(_ROOT))
+
+from agentxai.store.trajectory_store import TrajectoryStore
 
 API_BASE = "http://localhost:8000"
 HTTP_TIMEOUT = 10
 
 # ---------------------------------------------------------------------------
-# Database
+# Store wrapper
 # ---------------------------------------------------------------------------
 
 @st.cache_resource
-def _get_conn() -> sqlite3.Connection:
-    _DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(_DB_PATH), check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS manual_reviews (
-            review_id        INTEGER PRIMARY KEY AUTOINCREMENT,
-            task_id          TEXT NOT NULL,
-            plausibility     INTEGER,
-            completeness     INTEGER,
-            specificity      INTEGER,
-            causal_coherence INTEGER,
-            notes            TEXT,
-            status           TEXT NOT NULL DEFAULT 'reviewed',
-            reviewed_at      TEXT NOT NULL
-        )
-    """)
-    conn.execute(
-        "CREATE UNIQUE INDEX IF NOT EXISTS uq_manual_reviews_task_id "
-        "ON manual_reviews(task_id)"
-    )
-    conn.commit()
-    return conn
+def _get_store() -> TrajectoryStore:
+    """
+    Open the project's TrajectoryStore once per Streamlit session.
+
+    The store auto-creates `manual_reviews_v2` on init and copies any
+    legacy `manual_reviews` rows into it (idempotent — see
+    ``migrate_legacy_manual_reviews``). The legacy table stays
+    readable so existing analyses don't break.
+    """
+    return TrajectoryStore()
 
 
-def _get_done(conn: sqlite3.Connection) -> Dict[str, str]:
-    cur = conn.execute("SELECT task_id, status FROM manual_reviews")
-    return {row["task_id"]: row["status"] for row in cur.fetchall()}
+def _get_done(store: TrajectoryStore) -> Dict[str, str]:
+    """Map medqa_task_id → status across both v2 and legacy tables."""
+    out: Dict[str, str] = {}
+    for r in store.list_manual_reviews(include_legacy=True):
+        mid = r.get("medqa_task_id")
+        if mid:
+            # v2 wins on conflict — list_manual_reviews already enforces
+            # this, so the first occurrence is the authoritative one.
+            out.setdefault(mid, r.get("status", ""))
+    return out
 
 
 def _save(
-    conn: sqlite3.Connection,
-    task_id: str,
+    store: TrajectoryStore,
+    *,
+    medqa_task_id: str,
     plausibility: Optional[int],
     completeness: Optional[int],
     specificity: Optional[int],
     causal_coherence: Optional[int],
     notes: str,
     status: str,
+    valid_medqa_ids: set,
 ) -> None:
-    conn.execute(
-        """
-        INSERT OR REPLACE INTO manual_reviews
-            (task_id, plausibility, completeness, specificity,
-             causal_coherence, notes, status, reviewed_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            task_id,
-            plausibility, completeness, specificity, causal_coherence,
-            notes, status,
-            datetime.now(timezone.utc).isoformat(),
-        ),
+    """
+    Persist a review row, validating the MedQA id and linking the most
+    recent pipeline run (when one exists) so the FK is populated.
+
+    Raises ValueError when ``medqa_task_id`` isn't in the deterministic
+    500-record review split — guards against orphaned reviews from
+    typos / id-format mistakes.
+    """
+    if medqa_task_id not in valid_medqa_ids:
+        raise ValueError(
+            f"medqa_task_id={medqa_task_id!r} is not in the 500-record "
+            "review split — refusing to save to avoid orphaning."
+        )
+    store.save_manual_review(
+        medqa_task_id=medqa_task_id,
+        plausibility=plausibility,
+        completeness=completeness,
+        specificity=specificity,
+        causal_coherence=causal_coherence,
+        notes=notes,
+        status=status,
+        # link_pipeline_task=True → save_manual_review fills
+        # pipeline_task_id from the most recent run for this MedQA id.
+        link_pipeline_task=True,
+        reviewed_at=datetime.now(timezone.utc).isoformat(),
     )
-    conn.commit()
 
 
 # ---------------------------------------------------------------------------
@@ -235,8 +244,8 @@ def _first_unreviewed(records: List[Dict], done: Dict[str, str]) -> int:
     return 0
 
 
-def _advance(records: List[Dict], conn: sqlite3.Connection) -> None:
-    done = _get_done(conn)
+def _advance(records: List[Dict], store: TrajectoryStore) -> None:
+    done = _get_done(store)
     current = st.session_state.get("review_idx", 0)
     for delta in range(1, len(records) + 1):
         candidate = (current + delta) % len(records)
@@ -252,22 +261,23 @@ def _advance(records: List[Dict], conn: sqlite3.Connection) -> None:
 
 def _render_rating_form(
     task_id: str,
-    conn: sqlite3.Connection,
+    store: TrajectoryStore,
     done: Dict[str, str],
     records: List[Dict],
+    valid_medqa_ids: set,
 ) -> None:
     st.divider()
     st.markdown("### Rate this record")
 
-    # Pre-fill from any existing row
-    existing: Optional[Dict] = None
-    if task_id in done:
-        cur = conn.execute(
-            "SELECT * FROM manual_reviews WHERE task_id=?", (task_id,)
-        )
-        row = cur.fetchone()
-        if row:
-            existing = dict(row)
+    # Pre-fill from any existing row (v2 first, then legacy fall-through).
+    existing: Optional[Dict] = store.get_manual_review(task_id)
+    if existing is None:
+        # Surface any legacy row so the user sees their old rating
+        # rather than starting from defaults.
+        for legacy in store._read_legacy_manual_reviews():
+            if legacy.get("medqa_task_id") == task_id:
+                existing = legacy
+                break
 
     def _default(field: str, fallback: int = 3) -> int:
         if existing and existing.get(field) is not None:
@@ -319,13 +329,38 @@ def _render_rating_form(
     )
 
     if save_clicked:
-        _save(conn, task_id, plausibility, completeness, specificity, causal_coherence, notes, "reviewed")
-        _advance(records, conn)
+        try:
+            _save(
+                store,
+                medqa_task_id=task_id,
+                plausibility=plausibility,
+                completeness=completeness,
+                specificity=specificity,
+                causal_coherence=causal_coherence,
+                notes=notes,
+                status="reviewed",
+                valid_medqa_ids=valid_medqa_ids,
+            )
+        except ValueError as exc:
+            st.error(str(exc))
+            return
+        _advance(records, store)
         st.rerun()
 
     if skip_clicked:
-        _save(conn, task_id, None, None, None, None, notes or "", "skipped")
-        _advance(records, conn)
+        try:
+            _save(
+                store,
+                medqa_task_id=task_id,
+                plausibility=None, completeness=None,
+                specificity=None, causal_coherence=None,
+                notes=notes or "", status="skipped",
+                valid_medqa_ids=valid_medqa_ids,
+            )
+        except ValueError as exc:
+            st.error(str(exc))
+            return
+        _advance(records, store)
         st.rerun()
 
 
@@ -338,8 +373,11 @@ def main() -> None:
     st.title("XAI Quality Review")
 
     records = _load_review_records()
-    conn = _get_conn()
-    done = _get_done(conn)
+    store = _get_store()
+    done = _get_done(store)
+    # The set of MedQA ids the deterministic split actually produced —
+    # validates writes to prevent typos creating orphan reviews.
+    valid_medqa_ids = {r["task_id"] for r in records}
 
     n_total = len(records)
     n_reviewed = sum(1 for s in done.values() if s == "reviewed")
@@ -433,7 +471,22 @@ def main() -> None:
                 "the patient case and ground truth alone."
             )
 
-    _render_rating_form(task_id, conn, done, records)
+    # Surface the pipeline_task_id we'll link this review to, when one
+    # exists. Otherwise the FK column stays NULL and the reviewer sees
+    # they're rating a record that hasn't been pipeline-processed yet.
+    linked_pipeline_id = store.latest_pipeline_task_id_for(task_id)
+    if linked_pipeline_id:
+        st.caption(
+            f"🔗 Will link review to pipeline run "
+            f"`{linked_pipeline_id[:12]}…` (most recent for this MedQA record)."
+        )
+    else:
+        st.caption(
+            "ℹ No pipeline run found for this MedQA record yet — review "
+            "will be saved with a NULL pipeline_task_id link."
+        )
+
+    _render_rating_form(task_id, store, done, records, valid_medqa_ids)
 
 
 if __name__ == "__main__":

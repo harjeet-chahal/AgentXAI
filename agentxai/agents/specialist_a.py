@@ -114,7 +114,10 @@ class SpecialistA(TracedAgent):
                 outcome=f"severity={severity:.3f}",
             )
 
-            # 4. Summarise → memory + finding message
+            # 4. Summarise → memory + finding message.
+            # Wrap the writes + message in `traced_action` so each MemoryDiff
+            # links to the summarize_findings event (otherwise the writes
+            # fire before any event exists and land "outside_traced_action").
             confidence = (hits / len(symptoms)) if symptoms else 0.0
             findings: Dict[str, Any] = {
                 "symptom_patterns": symptoms,
@@ -122,19 +125,19 @@ class SpecialistA(TracedAgent):
                 "top_conditions":   top_conditions,
                 "confidence":       round(confidence, 4),
             }
-            for k, v in findings.items():
-                self.memory[k] = v
-
-            self.send_message(
-                receiver=self.orchestrator_id,
-                message_type="finding",
-                content=findings,
-            )
-            self.log_action(
+            with self.traced_action(
                 "summarize_findings",
                 {"keys": list(findings.keys())},
                 outcome="memory+message written",
-            )
+            ):
+                for k, v in findings.items():
+                    self.memory[k] = v
+
+                self.send_message(
+                    receiver=self.orchestrator_id,
+                    message_type="finding",
+                    content=findings,
+                )
 
         return findings
 

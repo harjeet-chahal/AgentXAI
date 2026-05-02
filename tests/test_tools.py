@@ -150,6 +150,54 @@ def test_pubmed_search_returns_topk_textbook_passages():
 
 
 # ---------------------------------------------------------------------------
+# pubmed_search — name + description honesty
+# ---------------------------------------------------------------------------
+
+class TestPubmedSearchNameHonesty:
+    """
+    The function name `pubmed_search` is preserved for backward compat
+    with stored records and call sites, but every user-facing surface
+    (Tool description, module docstring, dashboard alias) must clearly
+    say it's actually a local FAISS textbook search.
+    """
+
+    def test_tool_description_states_local_faiss_not_pubmed(self):
+        desc = (pubmed_search_tool.description or "").lower()
+        # Must call out that it's local + FAISS-based.
+        assert "local" in desc
+        assert "faiss" in desc
+        # Must explicitly disclaim the misleading name.
+        assert ("not the pubmed" in desc) or ("not pubmed" in desc) or ("not real pubmed" in desc)
+
+    def test_module_docstring_explains_naming(self):
+        from agentxai.tools import pubmed_search as mod
+        doc = (mod.__doc__ or "").lower()
+        assert "local" in doc and "faiss" in doc
+        assert "not real pubmed" in doc or "not the pubmed" in doc
+
+    def test_dashboard_display_alias_overrides_pubmed_search(self):
+        # Defer the import so the test suite doesn't hard-depend on
+        # streamlit at collection time when this test is skipped.
+        from agentxai.ui.dashboard import (
+            _TOOL_DISPLAY_OVERRIDES,
+            _tool_display_name,
+        )
+        assert "pubmed_search" in _TOOL_DISPLAY_OVERRIDES
+        label = _tool_display_name("pubmed_search")
+        assert label != "pubmed_search", "alias must change the display label"
+        low = label.lower()
+        assert "local" in low and "textbook" in low
+
+    def test_dashboard_display_alias_passes_unknown_names_through(self):
+        from agentxai.ui.dashboard import _tool_display_name
+        assert _tool_display_name("symptom_lookup") == "symptom_lookup"
+        assert _tool_display_name("guideline_lookup") == "guideline_lookup"
+        assert _tool_display_name("severity_scorer") == "severity_scorer"
+        assert _tool_display_name("") == "?"
+        assert _tool_display_name(None) == "?"
+
+
+# ---------------------------------------------------------------------------
 # guideline_lookup
 # ---------------------------------------------------------------------------
 
