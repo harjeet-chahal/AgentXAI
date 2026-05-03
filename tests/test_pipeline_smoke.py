@@ -5,7 +5,7 @@ Runs ONE real MedQA record through the full multi-agent + XAI pipeline
 against a real Claude LLM. Marked ``slow`` because it costs a handful of
 API calls; pass ``--run-slow`` to enable.
 
-The ``pubmed_search`` tool is stubbed because the local FAISS textbook
+The ``textbook_search`` tool is stubbed because the local FAISS textbook
 index segfaults during build on Apple Silicon (numpy 2.4.4 + torch 2.11);
 the rest of the tools (symptom_lookup, severity_scorer, guideline_lookup)
 hit their real cached indices.
@@ -49,7 +49,7 @@ _FAKE_DOCS = [
 ]
 
 
-def _stub_pubmed_search(query: str, k: int = 5):
+def _stub_textbook_search(query: str, k: int = 5):
     return list(_FAKE_DOCS[: max(0, k)])
 
 
@@ -61,14 +61,14 @@ def _row_count(store: TrajectoryStore, table: str) -> int:
 
 @pytest.mark.slow
 def test_pipeline_end_to_end_on_one_medqa_record(tmp_path):
-    """Real LLM, real cached tool indices, stubbed PubMed (FAISS)."""
+    """Real LLM, real cached tool indices, stubbed textbook FAISS."""
     if not os.environ.get("GOOGLE_API_KEY"):
         pytest.skip("GOOGLE_API_KEY not set; skipping live LLM smoke test.")
 
     db_path = tmp_path / "smoke.db"
     db_url = f"sqlite:///{db_path}"
 
-    pipeline = Pipeline(db_url=db_url, pubmed_search_fn=_stub_pubmed_search)
+    pipeline = Pipeline(db_url=db_url, textbook_search_fn=_stub_textbook_search)
 
     record = load_medqa_us("train")[0]
     result = pipeline.run_task(record)

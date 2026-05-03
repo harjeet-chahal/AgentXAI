@@ -54,7 +54,7 @@ class TestIsAggregatorEvent:
 
     def test_real_decision_is_not_aggregator(self):
         assert not _is_aggregator_event({
-            "action": "pubmed_search",
+            "action": "textbook_search",
             "event_type": "tool_call",
         })
         assert not _is_aggregator_event({
@@ -108,9 +108,9 @@ class TestIsStaleAccountabilityReport:
     def test_clean_record_is_not_stale(self):
         # Selector ran AND found a real upstream cause.
         report = {
-            "root_cause_event_id": "evt-pubmed",
+            "root_cause_event_id": "evt-textbook",
             "root_cause_reason":
-                "pubmed_search from specialist_b: high-impact tool (0.85)",
+                "textbook_search from specialist_b: high-impact tool (0.85)",
         }
         assert _is_stale_accountability_report(report) is False
 
@@ -128,7 +128,7 @@ class TestStalenessMessage:
     def test_empty_for_clean_report(self):
         report = {
             "root_cause_reason":
-                "pubmed_search from specialist_b: high-impact tool (0.85)",
+                "textbook_search from specialist_b: high-impact tool (0.85)",
         }
         assert _staleness_message(report) == ""
 
@@ -191,17 +191,17 @@ class TestWhatMatteredPrefersRootCauseReason:
     def test_uses_root_cause_reason_verbatim_when_present(self):
         record = _record_with_report(
             root_cause_reason=(
-                "pubmed_search from specialist_b: high-impact tool (0.85)"
+                "textbook_search from specialist_b: high-impact tool (0.85)"
             ),
             root_event={
                 "event_id": "e1",
                 "agent_id": "specialist_b",
                 "event_type": "tool_call",
-                "action": "pubmed_search",
+                "action": "textbook_search",
             },
         )
         out = _build_what_mattered_paragraph(record)
-        assert "pubmed_search from specialist_b: high-impact tool" in out
+        assert "textbook_search from specialist_b: high-impact tool" in out
         # Surfaced verbatim — no naked `event_type from agent` synthesis.
         assert "tool_call from specialist_b" not in out
 
@@ -234,11 +234,11 @@ class TestWhatMatteredPrefersRootCauseReason:
                 "event_id": "e1",
                 "agent_id": "specialist_b",
                 "event_type": "tool_call",
-                "action": "pubmed_search",
+                "action": "textbook_search",
             },
         )
         out = _build_what_mattered_paragraph(record)
-        assert "pubmed_search from specialist_b" in out
+        assert "textbook_search from specialist_b" in out
 
     def test_no_root_cause_at_all_skips_root_sentence(self):
         record = _record_with_report(root_cause_reason="", root_event=None)
@@ -279,7 +279,7 @@ class TestRenderStalenessBanner:
         )
         _render_staleness_banner({
             "root_cause_reason":
-                "pubmed_search from specialist_b: high-impact tool (0.85)",
+                "textbook_search from specialist_b: high-impact tool (0.85)",
         })
         assert captured == [], "banner must not render for clean report"
 

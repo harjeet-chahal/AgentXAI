@@ -196,8 +196,8 @@ The following is a representative (abbreviated) `AgentXAIRecord` for a USMLE Ste
         "plan_id": "plan-b-001",
         "agent_id": "specialist_b",
         "timestamp": 1714000003.80,
-        "intended_actions": ["pubmed_search", "guideline_lookup"],
-        "actual_actions":   ["pubmed_search", "guideline_lookup"],
+        "intended_actions": ["textbook_search", "guideline_lookup"],
+        "actual_actions":   ["textbook_search", "guideline_lookup"],
         "deviations": [],
         "deviation_reasons": []
       }
@@ -316,8 +316,8 @@ python -m agentxai.data.build_knowledge_base
 
 | Artefact | Content | Used by |
 |----------|---------|---------|
-| `textbooks/index.faiss` | FAISS IndexFlatIP over ~500-token passages, embedded with `all-MiniLM-L6-v2` | `pubmed_search` tool (SpecialistB) |
-| `textbooks/metadata.jsonl` | Parallel chunk metadata: source file, char offsets, passage text | `pubmed_search` |
+| `textbooks/index.faiss` | FAISS IndexFlatIP over ~500-token passages, embedded with `all-MiniLM-L6-v2` | `textbook_search` tool (SpecialistB) |
+| `textbooks/metadata.jsonl` | Parallel chunk metadata: source file, char offsets, passage text | `textbook_search` |
 | `guidelines.json` | Structured stubs for the 50 most-common conditions in US MedQA answers | `guideline_lookup` tool (SpecialistB) |
 
 > **Note:** `guidelines.json` contains synthetic stubs, not real clinical guidelines. Replace with authoritative data before any clinical application.

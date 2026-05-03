@@ -40,6 +40,7 @@ _log = logging.getLogger(__name__)
 load_dotenv(override=True)
 
 from agentxai.agents.base import make_default_llm
+from agentxai.agents.critic import Critic
 from agentxai.agents.orchestrator import Orchestrator
 from agentxai.agents.specialist_a import SpecialistA
 from agentxai.agents.specialist_b import SpecialistB
@@ -48,7 +49,7 @@ from agentxai.data.load_medqa import load_medqa_us
 from agentxai.data.schemas import AgentXAIRecord
 from agentxai.store.trajectory_store import TrajectoryStore
 from agentxai.tools.guideline_lookup import guideline_lookup as _gl_tool
-from agentxai.tools.pubmed_search import pubmed_search as _pm_tool
+from agentxai.tools.textbook_search import textbook_search as _tb_tool
 from agentxai.tools.severity_scorer import severity_scorer as _sev_tool
 from agentxai.tools.symptom_lookup import symptom_lookup as _sym_tool
 from agentxai.xai.accountability import AccountabilityReportGenerator
@@ -68,7 +69,7 @@ from agentxai.xai.trajectory_logger import TrajectoryLogger
 
 _RAW_SYMPTOM_LOOKUP   = getattr(_sym_tool, "__wrapped__", _sym_tool)
 _RAW_SEVERITY_SCORER  = getattr(_sev_tool, "__wrapped__", _sev_tool)
-_RAW_PUBMED_SEARCH    = getattr(_pm_tool,  "__wrapped__", _pm_tool)
+_RAW_TEXTBOOK_SEARCH  = getattr(_tb_tool,  "__wrapped__", _tb_tool)
 _RAW_GUIDELINE_LOOKUP = getattr(_gl_tool,  "__wrapped__", _gl_tool)
 
 
@@ -77,7 +78,7 @@ _RAW_GUIDELINE_LOOKUP = getattr(_gl_tool,  "__wrapped__", _gl_tool)
 _NEUTRAL_TOOL_RESULT: Dict[str, Callable[..., Any]] = {
     "symptom_lookup":   lambda *a, **kw: {"related_conditions": [], "source": "neutral"},
     "severity_scorer":  lambda *a, **kw: 0.0,
-    "pubmed_search":    lambda *a, **kw: [],
+    "textbook_search":  lambda *a, **kw: [],
     "guideline_lookup": lambda *a, **kw: {"match": None},
 }
 
@@ -96,7 +97,7 @@ class Pipeline:
         llm: Any = None,
         symptom_lookup_fn: Optional[Callable[..., Any]] = None,
         severity_scorer_fn: Optional[Callable[..., Any]] = None,
-        pubmed_search_fn: Optional[Callable[..., Any]] = None,
+        textbook_search_fn: Optional[Callable[..., Any]] = None,
         guideline_lookup_fn: Optional[Callable[..., Any]] = None,
     ) -> None:
         self.db_url = db_url
@@ -105,7 +106,7 @@ class Pipeline:
 
         self._raw_symptom_lookup   = symptom_lookup_fn   or _RAW_SYMPTOM_LOOKUP
         self._raw_severity_scorer  = severity_scorer_fn  or _RAW_SEVERITY_SCORER
-        self._raw_pubmed_search    = pubmed_search_fn    or _RAW_PUBMED_SEARCH
+        self._raw_textbook_search  = textbook_search_fn  or _RAW_TEXTBOOK_SEARCH
         self._raw_guideline_lookup = guideline_lookup_fn or _RAW_GUIDELINE_LOOKUP
 
         # Snapshots of completed runs, keyed by task_id (used by resume_from).
@@ -195,6 +196,19 @@ class Pipeline:
         final = result.get("final_output", {}) or {}
 
         predicted_letter, predicted_text = _resolve_predicted_letter(final, options)
+
+        # 4b. Self-critique pass — give the system a chance to revise once
+        # before the answer is persisted. Cap revisions at 1 to bound LLM cost.
+        revision_count, final, predicted_letter, predicted_text = self._run_self_critique(
+            agents=agents,
+            loggers=loggers,
+            agent_payload=agent_payload,
+            final=final,
+            predicted_letter=predicted_letter,
+            predicted_text=predicted_text,
+            options=options,
+        )
+
         correct = bool(predicted_letter and predicted_letter == ground_truth["correct_answer"])
 
         # Heuristic confidence breakdown — five 0-1 factors explaining
@@ -251,6 +265,10 @@ class Pipeline:
             # calibrated. Older records load with this key absent; the
             # dashboard renders the panel only when present.
             "confidence_factors":      confidence_factors,
+            # 0 if the Critic accepted the first answer; 1 if it flagged a
+            # gap and the Orchestrator was re-run with the gaps injected.
+            # Capped at 1 to bound LLM cost (see _run_self_critique).
+            "revision_count":          revision_count,
         }
         task_record.system_output = system_output
         store.save_task(task_record)
@@ -306,10 +324,16 @@ class Pipeline:
         CausalDAGBuilder(store).build(task_id)
 
         # 7. Accountability report.
+        # The critic is included in the agent list so it gets a
+        # responsibility score alongside the specialists. Its score is
+        # usually low (it never calls tools and its memory writes are
+        # only consumed when the Synthesizer is re-run) — that low score
+        # is itself informative: it tells the dashboard whether the
+        # critique loop changed the answer or just rubber-stamped it.
         AccountabilityReportGenerator(
             store=store,
             pipeline=self,
-            specialist_agents=("specialist_a", "specialist_b"),
+            specialist_agents=("specialist_a", "specialist_b", "critic"),
             llm=self.llm,
         ).generate(
             task_id=task_id,
@@ -415,6 +439,82 @@ class Pipeline:
         return synth.run(payload) or {}
 
     # ------------------------------------------------------------------
+    # Self-critique loop
+    # ------------------------------------------------------------------
+
+    def _run_self_critique(
+        self,
+        *,
+        agents: Dict[str, Any],
+        loggers: Dict[str, Any],
+        agent_payload: Dict[str, Any],
+        final: Dict[str, Any],
+        predicted_letter: str,
+        predicted_text: str,
+        options: Dict[str, str],
+    ) -> Tuple[int, Dict[str, Any], str, str]:
+        """
+        Run the Critic over the current synthesizer output and, if it flags
+        a substantive gap, re-call the Orchestrator once with the gaps
+        injected into the payload.
+
+        Returns ``(revision_count, final, predicted_letter, predicted_text)``.
+        ``revision_count`` is 0 when the Critic accepts the first answer or
+        the Critic itself fails; 1 when a revision was applied. The cap is
+        a hard 1 — the Critic is NOT consulted again after the revision,
+        which is what bounds cost and prevents infinite loops.
+        """
+        critic = agents.get("critic")
+        if critic is None:
+            return 0, final, predicted_letter, predicted_text
+
+        critique = critic.run({
+            "rationale":        final.get("rationale", "") or "",
+            "predicted_letter": predicted_letter,
+            "predicted_text":   predicted_text,
+            "options":          options,
+        }) or {}
+
+        # Persist the critique as a TrajectoryEvent on the pipeline's
+        # trajectory under the dedicated "critic" agent so the dashboard
+        # surfaces it as a self_critique row independent of any plan/action
+        # the Critic agent itself logged.
+        loggers["trajectory_logger"].log_event(
+            agent_id="critic",
+            event_type="self_critique",
+            action_inputs={
+                "predicted_letter":        predicted_letter,
+                "missing_considerations":  list(critique.get("missing_considerations", [])),
+            },
+            state_after={
+                "needs_revision":          bool(critique.get("needs_revision", False)),
+                "confidence_in_critique":  float(critique.get("confidence_in_critique", 0.0) or 0.0),
+            },
+            outcome=(
+                "revision_needed"
+                if critique.get("needs_revision")
+                else "no_revision_needed"
+            ),
+        )
+
+        if not critique.get("needs_revision"):
+            return 0, final, predicted_letter, predicted_text
+
+        # Revise once. The cap is enforced by simply NOT consulting the
+        # Critic again after this single re-run; even if the second-pass
+        # answer would also fail review, we exit here.
+        revised_payload: Dict[str, Any] = {
+            **agent_payload,
+            "missing_considerations": list(critique.get("missing_considerations", [])),
+        }
+        revised_result = agents["orchestrator"].run(revised_payload) or {}
+        revised_final = revised_result.get("final_output", {}) or {}
+        revised_letter, revised_text = _resolve_predicted_letter(
+            revised_final, options,
+        )
+        return 1, revised_final, revised_letter, revised_text
+
+    # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
 
@@ -441,7 +541,7 @@ class Pipeline:
 
         sym_fn = _wrap_tool(tool_logger, "specialist_a", "symptom_lookup",   self._raw_symptom_lookup)
         sev_fn = _wrap_tool(tool_logger, "specialist_a", "severity_scorer",  self._raw_severity_scorer)
-        pub_fn = _wrap_tool(tool_logger, "specialist_b", "pubmed_search",    self._raw_pubmed_search)
+        tb_fn  = _wrap_tool(tool_logger, "specialist_b", "textbook_search",  self._raw_textbook_search)
         gl_fn  = _wrap_tool(tool_logger, "specialist_b", "guideline_lookup", self._raw_guideline_lookup)
 
         spec_a = SpecialistA(
@@ -454,7 +554,7 @@ class Pipeline:
         )
         spec_b = SpecialistB(
             agent_id="specialist_b",
-            pubmed_search_fn=pub_fn,
+            textbook_search_fn=tb_fn,
             guideline_lookup_fn=gl_fn,
             orchestrator_id="orchestrator",
             llm=self.llm,
@@ -475,11 +575,17 @@ class Pipeline:
             llm=self.llm,
             **loggers,
         )
+        critic = Critic(
+            agent_id="critic",
+            llm=self.llm,
+            **loggers,
+        )
         agents = {
             "specialist_a": spec_a,
             "specialist_b": spec_b,
             "synthesizer":  synth,
             "orchestrator": orch,
+            "critic":       critic,
         }
         return loggers, agents, tool_logger
 
@@ -537,11 +643,11 @@ class Pipeline:
         payload: Dict[str, Any],
         patched_tools: Dict[str, Callable[..., Any]],
     ) -> Dict[str, Any]:
-        pub_fn = patched_tools.get("pubmed_search",    self._raw_pubmed_search)
+        tb_fn  = patched_tools.get("textbook_search",  self._raw_textbook_search)
         gl_fn  = patched_tools.get("guideline_lookup", self._raw_guideline_lookup)
         spec_b = SpecialistB(
             agent_id="specialist_b",
-            pubmed_search_fn=pub_fn,
+            textbook_search_fn=tb_fn,
             guideline_lookup_fn=gl_fn,
             orchestrator_id="orchestrator",
             llm=self.llm,

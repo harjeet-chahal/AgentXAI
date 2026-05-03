@@ -14,13 +14,12 @@ AgentXAI/
 │   │   ├── base.py              ← TracedAgent base class, make_default_llm()
 │   │   ├── orchestrator.py      ← Orchestrator  (routes, coordinates)
 │   │   ├── specialist_a.py      ← SpecialistA   (symptom + severity)
-│   │   ├── specialist_b.py      ← SpecialistB   (textbook search + guidelines — see §"Tool naming")
+│   │   ├── specialist_b.py      ← SpecialistB   (textbook_search + guideline_lookup)
 │   │   └── synthesizer.py       ← Synthesizer   (final diagnosis)
 │   ├── tools/
 │   │   ├── symptom_lookup.py    ← @traced_tool, queries FAISS index
 │   │   ├── severity_scorer.py   ← @traced_tool, LLM-rated 0–1 score
-│   │   ├── pubmed_search.py     ← @traced_tool, FAISS over textbook chunks
-│   │   │                          (NOT real PubMed — see §"Tool naming")
+│   │   ├── textbook_search.py   ← @traced_tool, FAISS over textbook chunks
 │   │   └── guideline_lookup.py  ← @traced_tool, searches guideline stubs
 │   ├── xai/
 │   │   ├── trajectory_logger.py ← Pillar 1 — log_event(), all state transitions
@@ -80,8 +79,8 @@ Pipeline.run_task(record)
   │       │                                 ─► MessageLogger
   │       │
   │       ├─ SpecialistB.run()
-  │       │     with active_plan(["pubmed_search","guideline_lookup"])
-  │       │       pubmed_search(query)       ─► ToolProvenanceLogger
+  │       │     with active_plan(["textbook_search","guideline_lookup"])
+  │       │       textbook_search(query)     ─► ToolProvenanceLogger
   │       │       guideline_lookup(cond)     ─► ToolProvenanceLogger
   │       │     send_message("synthesizer", "finding", {...})
   │       │
@@ -188,49 +187,26 @@ SQLAlchemy ORM table managed alongside the rest of the schema:
 
 ---
 
-## Tool naming — `pubmed_search` is a local FAISS textbook search
+## Tool — `textbook_search` (local FAISS over medical textbooks)
 
-The tool registered as `pubmed_search` does **not** call the PubMed/NCBI
-API. Despite the name, it runs a top-k semantic search over a local
-FAISS index built from 18 medical textbooks (Harrison, Robbins, First
-Aid, …) using `all-MiniLM-L6-v2` embeddings. See
-`agentxai/tools/pubmed_search.py` for the full implementation.
+`textbook_search` runs a top-k semantic search over a local FAISS
+index built from 18 medical textbooks (Harrison, Robbins, First Aid, …)
+using `all-MiniLM-L6-v2` embeddings. See
+`agentxai/tools/textbook_search.py` for the implementation.
 
-**Why the name is preserved.** The identifier `pubmed_search` is a
-stable integration point referenced in three places that we don't want
-to churn just to fix a label:
+The function signature `(query: str, k: int) -> List[dict]` and the
+`{doc_id, text, score, source_file}` result shape are the contract every
+downstream consumer expects. To swap in a different evidence source
+(e.g., a real PubMed/E-utilities client), either replace the body of
+`textbook_search()` in place, or inject an alternate implementation via
+SpecialistB's `textbook_search_fn` constructor parameter (the smoke test
+uses this to stub out FAISS on Apple Silicon).
 
-  1. **Stored records** — every historical `tool_use_events` row carries
-     `tool_name="pubmed_search"`. Renaming would either invalidate them
-     or require a migration.
-  2. **Specialist B's plan + log_action calls** — the action is logged
-     under `pubmed_search`, which feeds the trajectory log, the causal
-     DAG, and the accountability report.
-  3. **Tests + mocks** — `pubmed_search_fn` is the constructor parameter
-     SpecialistB exposes for dependency-injection (used by the smoke
-     test to stub out FAISS on Apple Silicon).
-
-**How the truth is surfaced.** The Streamlit dashboard maps the stored
-name to a clarified label via `_TOOL_DISPLAY_OVERRIDES` in
-`agentxai/ui/dashboard.py`:
-
-> `pubmed_search` → **pubmed_search (local textbook FAISS)**
-
-The Tool Provenance tab also renders an info caption noting the
-display-alias rule when an aliased tool appears in the task. Stored
-records, API responses, and call sites continue to use the bare name.
-
-**How to swap in real PubMed later.** Either:
-
-  * Replace the body of `pubmed_search()` in
-    `agentxai/tools/pubmed_search.py` with a real PubMed/E-utilities
-    client; the function signature `(query: str, k: int) -> List[dict]`
-    and the `{doc_id, text, score, source_file}` result shape are the
-    contract every downstream consumer expects, OR
-  * Inject a different implementation via SpecialistB's
-    `pubmed_search_fn` constructor parameter and remove
-    `pubmed_search` from `_TOOL_DISPLAY_OVERRIDES` so the alias caption
-    no longer fires.
+> **Note on history.** This tool was previously named `pubmed_search`,
+> which was misleading — it has never queried the PubMed/NCBI API. The
+> rename happened in a single sweep across stored fixtures, tests, and
+> the dashboard's tool-name overrides; older trajectory dumps may still
+> reference the old name.
 
 ---
 

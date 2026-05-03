@@ -737,7 +737,7 @@ class TestAggregatorFilter:
 
     def test_real_decision_actions_are_not_aggregators(self):
         for action in (
-            "pubmed_search",
+            "textbook_search",
             "symptom_lookup",
             "guideline_lookup",
             "summarize_findings",
@@ -751,16 +751,16 @@ class TestAggregatorFilter:
 
 class TestRootCauseSelection:
     """
-    Headline: with a synthetic graph in which `pubmed_search` causes
+    Headline: with a synthetic graph in which `textbook_search` causes
     `synthesize_diagnosis` and a downstream `read_specialist_memories`
     aggregator sits one hop from the terminal, the selector must pick
-    `pubmed_search` — not the aggregator.
+    `textbook_search` — not the aggregator.
     """
 
     def _build_synthetic_xai_and_graph(self):
         """
         Trajectory:
-            t=1  e_search   specialist_b   tool_call   pubmed_search
+            t=1  e_search   specialist_b   tool_call   textbook_search
             t=2  e_summary  specialist_b   action      summarize_findings  (writes mem, sends acted msg)
             t=3  e_read     synthesizer    action      read_specialist_memories  (aggregator)
             t=4  e_term     synthesizer    final       synthesize_diagnosis
@@ -778,7 +778,7 @@ class TestRootCauseSelection:
         events = [
             TrajectoryEvent(event_id=e_search,  timestamp=1.0,
                             agent_id="specialist_b", event_type="tool_call",
-                            action="pubmed_search"),
+                            action="textbook_search"),
             TrajectoryEvent(event_id=e_summary, timestamp=2.0,
                             agent_id="specialist_b", event_type="agent_action",
                             action="summarize_findings"),
@@ -791,7 +791,7 @@ class TestRootCauseSelection:
         ]
 
         tool = ToolUseEvent(
-            tool_name="pubmed_search", called_by="specialist_b", timestamp=1.0,
+            tool_name="textbook_search", called_by="specialist_b", timestamp=1.0,
             inputs={"q": "MI"}, outputs={"docs": []},
             duration_ms=10.0, downstream_impact_score=0.85,
         )
@@ -827,24 +827,24 @@ class TestRootCauseSelection:
             "read": e_read, "term": e_term,
         }
 
-    def test_pubmed_search_beats_read_specialist_memories(self):
+    def test_textbook_search_beats_read_specialist_memories(self):
         """
         The exact bug from the user report: under the old graph-weight-only
         selector, `read_specialist_memories` would win because its
-        outgoing edge to the terminal carries weight 1.0 vs `pubmed_search`'s
+        outgoing edge to the terminal carries weight 1.0 vs `textbook_search`'s
         chain weight further upstream. New selector must filter the
-        aggregator and pick `pubmed_search`.
+        aggregator and pick `textbook_search`.
         """
         xai, g, ids = self._build_synthetic_xai_and_graph()
         root_id, reason = _select_root_cause(g, ids["term"], xai)
 
         assert root_id == ids["search"], (
-            f"Expected pubmed_search ({ids['search']}) but got "
+            f"Expected textbook_search ({ids['search']}) but got "
             f"{root_id} with reason {reason!r}"
         )
         assert ids["read"] not in {root_id}
         # Reason should name the action, the agent, and the tool-impact bonus.
-        assert "pubmed_search" in reason
+        assert "textbook_search" in reason
         assert "specialist_b" in reason
         assert "high-impact tool" in reason
 
@@ -1020,18 +1020,18 @@ class TestRootCauseInReport:
         from agentxai.data.schemas import AccountabilityReport, XAIData
         ev = TrajectoryEvent(
             event_id="e2", agent_id="specialist_b",
-            event_type="tool_call", action="pubmed_search",
+            event_type="tool_call", action="textbook_search",
         )
         r = AccountabilityReport(
             final_outcome="MI", outcome_correct=True,
             agent_responsibility_scores={"specialist_b": 1.0},
             root_cause_event_id="e2",
-            root_cause_reason="pubmed_search from specialist_b: high-impact tool (0.85)",
+            root_cause_reason="textbook_search from specialist_b: high-impact tool (0.85)",
             causal_chain=["e2"],
         )
         s = _fallback_explanation(r, XAIData(trajectory=[ev]))
         # Reason verbatim, not the older "<event_type> from <agent>" form.
-        assert "rooted in pubmed_search from specialist_b: high-impact tool" in s
+        assert "rooted in textbook_search from specialist_b: high-impact tool" in s
         # Old phrasing must NOT also be appended (no double-rooting).
         assert s.count("rooted in") == 1
 

@@ -69,6 +69,22 @@ def _fake_llm(content: Any) -> MagicMock:
     return fake
 
 
+def _fake_llm_seq(*contents: Any) -> MagicMock:
+    """
+    LangChain-style chat LLM that returns each ``contents`` entry in turn,
+    one per ``.invoke()`` call. Use when a single test path needs different
+    LLM payloads for the plan / extraction / tool-gating calls.
+    """
+    fake = MagicMock()
+    responses = []
+    for c in contents:
+        r = MagicMock()
+        r.content = c if isinstance(c, str) else json.dumps(c)
+        responses.append(r)
+    fake.invoke.side_effect = responses
+    return fake
+
+
 def _messages_in(store: TrajectoryStore) -> List:
     return store.get_full_record(TASK_ID).xai_data.messages
 
@@ -124,8 +140,14 @@ def test_specialist_a_writes_memory_and_sends_finding(store, loggers):
     assert mem["top_conditions"][0][0] == "Acute MI"
     assert mem["top_conditions"][0][1] == pytest.approx(1.0)
 
-    # Tools were called the expected number of times.
-    assert llm.invoke.call_count == 1
+    # Tools were called the expected number of times. Four LLM calls now:
+    # generate_plan, extract_symptoms, _select_lookup_subset (LLM-gated tool
+    # selection for symptom_lookup), and _decide_score_severity (LLM-gated
+    # tool selection for severity_scorer). The fake LLM returns the same
+    # symptom list every time, so the gating helpers fall through to their
+    # default "run everything" branches and the underlying tool callables
+    # see the same arguments as before.
+    assert llm.invoke.call_count == 4
     assert fake_severity.call_count == 1
     fake_severity.assert_called_with(fake_symptoms)
 
@@ -154,7 +176,7 @@ def test_specialist_a_writes_memory_and_sends_finding(store, loggers):
 # ---------------------------------------------------------------------------
 
 def test_specialist_b_writes_memory_and_sends_finding(store, loggers):
-    """LLM emits candidates; pubmed_search and guideline_lookup mocked."""
+    """LLM emits candidates; textbook_search and guideline_lookup mocked."""
     fake_candidates = ["Acute myocardial infarction", "Pulmonary embolism"]
     llm = _fake_llm(fake_candidates)
 
@@ -170,7 +192,7 @@ def test_specialist_b_writes_memory_and_sends_finding(store, loggers):
         {"doc_id": "Robbins__0099",  "text": "Myocardial necrosis pathology ...",
          "score": 0.65, "source_file": "Pathology_Robbins.txt"},
     ]
-    fake_pubmed = MagicMock(return_value=fake_docs)
+    fake_textbook = MagicMock(return_value=fake_docs)
 
     def fake_guideline_lookup(condition: str) -> dict:
         if "myocardial" in condition.lower():
@@ -185,7 +207,7 @@ def test_specialist_b_writes_memory_and_sends_finding(store, loggers):
 
     agent = SpecialistB(
         agent_id="specialist_b",
-        pubmed_search_fn=fake_pubmed,
+        textbook_search_fn=fake_textbook,
         guideline_lookup_fn=fake_guideline_lookup,
         orchestrator_id="orchestrator",
         k_docs=5,
@@ -215,9 +237,13 @@ def test_specialist_b_writes_memory_and_sends_finding(store, loggers):
     assert mem["guideline_matches"][0]["match"] == "Myocardial infarction"
     assert mem["guideline_matches"][1]["match"] is None
 
-    # External calls.
-    assert llm.invoke.call_count == 1
-    fake_pubmed.assert_called_once_with(CASE_TEXT, k=5)
+    # External calls. Three LLM invocations: generate_plan,
+    # candidate-condition extraction, and the LLM-gated tool-selection
+    # decision for textbook_search/guideline_lookup. The fake LLM returns
+    # the same candidate list for every call, so the gating decision
+    # parses as None and falls back to "run both with default queries".
+    assert llm.invoke.call_count == 3
+    fake_textbook.assert_called_once_with(CASE_TEXT, k=5)
 
     # Finding message to the orchestrator with the slim summary.
     msgs = [m for m in _messages_in(store) if m.sender == "specialist_b"]
@@ -233,7 +259,7 @@ def test_specialist_b_writes_memory_and_sends_finding(store, loggers):
     plans = [p for p in _plans_in(store) if p.agent_id == "specialist_b"]
     assert len(plans) == 1
     assert plans[0].intended_actions == [
-        "extract_candidate_conditions", "pubmed_search",
+        "extract_candidate_conditions", "textbook_search",
         "guideline_lookup", "summarize_findings",
     ]
     assert plans[0].actual_actions == plans[0].intended_actions
@@ -328,48 +354,74 @@ def test_synthesizer_reads_memories_and_returns_structured_diagnosis(store, logg
 # Orchestrator
 # ---------------------------------------------------------------------------
 
+# A reusable trio of stand-ins used by every orchestrator test below.
+class _FakeSpecialist:
+    """Minimal specialist that records its calls and emits a finding message."""
+
+    def __init__(
+        self,
+        agent_id: str,
+        finding: Dict[str, Any],
+        message_logger: Any,
+        call_log: List[Dict[str, Any]],
+    ) -> None:
+        self.agent_id = agent_id
+        self._finding = finding
+        self._message_logger = message_logger
+        self._call_log = call_log
+        self.payloads: List[Dict[str, Any]] = []
+
+    def run(self, payload: dict) -> dict:
+        self.payloads.append(dict(payload))
+        self._call_log.append({"agent_id": self.agent_id, "payload": dict(payload)})
+        self._message_logger.send(
+            sender=self.agent_id,
+            receiver="orchestrator",
+            message_type="finding",
+            content=self._finding,
+        )
+        return self._finding
+
+
+class _FakeSynthesizer:
+    agent_id = "synthesizer"
+
+    def __init__(self, output: Dict[str, Any], call_log: List[Dict[str, Any]]) -> None:
+        self._output = output
+        self._call_log = call_log
+        self.last_payload: Dict[str, Any] = {}
+
+    def run(self, payload: dict) -> dict:
+        self._call_log.append({"agent_id": self.agent_id, "payload": dict(payload)})
+        self.last_payload = payload
+        return self._output
+
+
+def _orchestrator_actions(store: TrajectoryStore) -> List[str]:
+    return [
+        e.action for e in store.get_full_record(TASK_ID).xai_data.trajectory
+        if e.agent_id == "orchestrator" and e.event_type == "action"
+    ]
+
+
 def test_orchestrator_routes_to_specialists_and_synthesizer(store, loggers):
-    """Mock the three downstream agents; assert sequential routing + handoff."""
-    call_order: List[str] = []
-
-    class _FakeSpecialist:
-        def __init__(self, agent_id: str, finding: Dict[str, Any]):
-            self.agent_id = agent_id
-            self._finding = finding
-
-        def run(self, payload: dict) -> dict:
-            call_order.append(self.agent_id)
-            # Specialists normally also send a finding message — emulate that
-            # so collected_findings() has something to return.
-            loggers["message_logger"].send(
-                sender=self.agent_id,
-                receiver="orchestrator",
-                message_type="finding",
-                content=self._finding,
-            )
-            return self._finding
-
-    class _FakeSynthesizer:
-        agent_id = "synthesizer"
-
-        def __init__(self, output: Dict[str, Any]):
-            self._output = output
-            self.last_payload: Dict[str, Any] = {}
-
-        def run(self, payload: dict) -> dict:
-            call_order.append(self.agent_id)
-            self.last_payload = payload
-            return self._output
-
-    spec_a = _FakeSpecialist("specialist_a", {"top_conditions": [("Acute MI", 1.0)]})
-    spec_b = _FakeSpecialist("specialist_b", {"retrieval_confidence": 0.9})
+    """No LLM wired → fall back to the deterministic A → B → synth rotation."""
+    call_log: List[Dict[str, Any]] = []
+    spec_a = _FakeSpecialist(
+        "specialist_a", {"top_conditions": [("Acute MI", 1.0)]},
+        loggers["message_logger"], call_log,
+    )
+    spec_b = _FakeSpecialist(
+        "specialist_b", {"retrieval_confidence": 0.9},
+        loggers["message_logger"], call_log,
+    )
     synth_output = {
         "final_diagnosis": "Acute MI",
         "confidence":      0.93,
         "differential":    ["PE"],
         "rationale":       "Specialists converged on Acute MI.",
     }
-    synth = _FakeSynthesizer(synth_output)
+    synth = _FakeSynthesizer(synth_output, call_log)
 
     agent = Orchestrator(
         agent_id="orchestrator",
@@ -386,7 +438,9 @@ def test_orchestrator_routes_to_specialists_and_synthesizer(store, loggers):
     })
 
     # Sequential ordering — A before B before synthesizer.
-    assert call_order == ["specialist_a", "specialist_b", "synthesizer"]
+    assert [c["agent_id"] for c in call_log] == [
+        "specialist_a", "specialist_b", "synthesizer",
+    ]
 
     # Top-level return wires through the synthesizer's output.
     assert result["final_output"] == synth_output
@@ -397,11 +451,24 @@ def test_orchestrator_routes_to_specialists_and_synthesizer(store, loggers):
     assert synth.last_payload["specialist_a_id"] == "specialist_a"
     assert synth.last_payload["specialist_b_id"] == "specialist_b"
 
-    # Plan: exactly the four spec'd intended actions, all executed in order.
+    # Plan registers the available action set; with llm=None generate_plan
+    # returns the full list. The dynamic loop interleaves routing_decision
+    # events with the specialist calls, so the actual sequence is longer
+    # than the available-actions list — but every action is allowed.
     plans = [p for p in _plans_in(store) if p.agent_id == "orchestrator"]
     assert len(plans) == 1
     assert plans[0].intended_actions == _ORCHESTRATOR_PLAN
-    assert plans[0].actual_actions   == _ORCHESTRATOR_PLAN
+    assert _orchestrator_actions(store) == [
+        "decompose_case",
+        "routing_decision",
+        "route_to_specialist_a",
+        "routing_decision",
+        "route_to_specialist_b",
+        "routing_decision",
+        "handoff_to_synthesizer",
+    ]
+    # Every executed action is one of the registered intended actions, so
+    # the symmetric-diff deviation list is empty.
     assert plans[0].deviations == []
 
     # Orchestrator collected both specialists' finding messages via the
@@ -411,6 +478,257 @@ def test_orchestrator_routes_to_specialists_and_synthesizer(store, loggers):
     assert senders == ["specialist_a", "specialist_b"]
     for f in findings:
         assert f["type"] == "finding"
+
+
+# ---------------------------------------------------------------------------
+# Dynamic LLM-driven routing
+# ---------------------------------------------------------------------------
+
+def _routing_llm(plan: List[str], *decisions: Dict[str, Any]) -> MagicMock:
+    """
+    Build a fake LLM that recognises the orchestrator's two prompt families:
+
+      * generate_plan ("Available actions:" substring)         → returns ``plan``
+      * routing decisions ("Choose the next action" substring) → returns the
+        next entry from ``decisions``, in order. After the list runs out the
+        LLM keeps replaying the last decision so tests for the max-iterations
+        guard can drive an infinite "always re-call A" stream from a single
+        decision payload.
+    """
+    fake = MagicMock()
+    decision_iter = iter(decisions)
+    last_decision: Dict[str, Any] = decisions[-1] if decisions else {
+        "next_action": "synthesize", "reason": "default", "feedback_to_specialist": "",
+    }
+
+    def router(prompt: str) -> MagicMock:
+        nonlocal last_decision
+        if "Available actions" in prompt:
+            return _resp(plan)
+        if "Choose the next action" in prompt:
+            try:
+                payload = next(decision_iter)
+            except StopIteration:
+                payload = last_decision
+            else:
+                last_decision = payload
+            return _resp(payload)
+        return _resp([])
+
+    fake.invoke.side_effect = router
+    return fake
+
+
+def _resp(content: Any) -> MagicMock:
+    r = MagicMock()
+    r.content = content if isinstance(content, str) else json.dumps(content)
+    return r
+
+
+def test_orchestrator_iteration_0_synthesize_is_overridden_by_guard(store, loggers):
+    """
+    LLM votes 'synthesize' on iteration 0 with no specialists called yet →
+    the orchestrator's iteration-0 guard MUST override that to a specialist
+    call. Synthesizing with zero findings is wrong by definition; specialists
+    are how findings get gathered.
+
+    After the guard fires, Specialist A runs once. The fake LLM then replays
+    its last decision ('synthesize'), which is now valid (A has produced
+    findings), and the orchestrator hands off.
+    """
+    call_log: List[Dict[str, Any]] = []
+    spec_a = _FakeSpecialist(
+        "specialist_a", {"top_conditions": [("Acute MI", 0.7)]},
+        loggers["message_logger"], call_log,
+    )
+    spec_b = _FakeSpecialist("specialist_b", {}, loggers["message_logger"], call_log)
+    synth = _FakeSynthesizer(
+        {"final_diagnosis": "Acute MI", "confidence": 0.7,
+         "differential": [], "rationale": "After A's findings."},
+        call_log,
+    )
+
+    llm = _routing_llm(
+        _ORCHESTRATOR_PLAN,
+        {"next_action": "synthesize",
+         "reason": "case is simple; existing context suffices",
+         "feedback_to_specialist": ""},
+    )
+
+    agent = Orchestrator(
+        agent_id="orchestrator",
+        specialist_a=spec_a, specialist_b=spec_b, synthesizer=synth,
+        llm=llm, max_iterations=5,
+        **loggers,
+    )
+    agent.run({"patient_case": CASE_TEXT, "options": {"A": "PE", "B": "Acute MI"}})
+
+    # Guard fired: specialist_a ran before the synthesizer; B never called.
+    assert [c["agent_id"] for c in call_log] == ["specialist_a", "synthesizer"]
+
+    # Trajectory: decompose, guarded routing_decision, route_to_specialist_a,
+    # second routing_decision (now allowed to synthesize), handoff.
+    assert _orchestrator_actions(store) == [
+        "decompose_case",
+        "routing_decision",
+        "route_to_specialist_a",
+        "routing_decision",
+        "handoff_to_synthesizer",
+    ]
+
+    # The first routing_decision records the guard override in its outcome.
+    routing_events = [
+        e for e in store.get_full_record(TASK_ID).xai_data.trajectory
+        if e.agent_id == "orchestrator" and e.action == "routing_decision"
+    ]
+    assert len(routing_events) == 2
+    assert "iteration 0 guard" in routing_events[0].outcome
+    assert routing_events[0].action_inputs["next_action"] == "call_specialist_a"
+
+
+def test_orchestrator_iterative_recalls_specialist_with_feedback(store, loggers):
+    """
+    LLM re-calls Specialist A once with feedback, then synthesizes.
+
+    The feedback string must be threaded into the second specialist run's
+    input payload under ``feedback_from_orchestrator`` so the specialist's
+    prompt can react to it.
+    """
+    call_log: List[Dict[str, Any]] = []
+    spec_a = _FakeSpecialist(
+        "specialist_a", {"top_conditions": [("MI", 0.8)]},
+        loggers["message_logger"], call_log,
+    )
+    spec_b = _FakeSpecialist(
+        "specialist_b", {}, loggers["message_logger"], call_log,
+    )
+    synth = _FakeSynthesizer(
+        {"final_diagnosis": "Acute MI", "confidence": 0.85,
+         "differential": [], "rationale": "After follow-up from A."},
+        call_log,
+    )
+
+    llm = _routing_llm(
+        _ORCHESTRATOR_PLAN,
+        {"next_action": "call_specialist_a",
+         "reason": "need symptom analysis first",
+         "feedback_to_specialist": ""},
+        {"next_action": "call_specialist_a",
+         "reason": "low confidence — re-extract symptoms",
+         "feedback_to_specialist": "focus on ECG findings"},
+        {"next_action": "synthesize",
+         "reason": "second pass resolved the ambiguity",
+         "feedback_to_specialist": ""},
+    )
+
+    agent = Orchestrator(
+        agent_id="orchestrator",
+        specialist_a=spec_a, specialist_b=spec_b, synthesizer=synth,
+        llm=llm, max_iterations=5,
+        **loggers,
+    )
+    agent.run({"patient_case": CASE_TEXT, "options": {}})
+
+    # Two A calls, no B, then synth.
+    assert [c["agent_id"] for c in call_log] == [
+        "specialist_a", "specialist_a", "synthesizer",
+    ]
+
+    # First A call has no feedback; second A call carries the LLM's feedback string.
+    assert "feedback_from_orchestrator" not in spec_a.payloads[0]
+    assert spec_a.payloads[1]["feedback_from_orchestrator"] == "focus on ECG findings"
+
+    # Trajectory has three routing_decision events sandwiched between
+    # the two specialist calls and the final handoff.
+    assert _orchestrator_actions(store) == [
+        "decompose_case",
+        "routing_decision",
+        "route_to_specialist_a",
+        "routing_decision",
+        "route_to_specialist_a",
+        "routing_decision",
+        "handoff_to_synthesizer",
+    ]
+
+    # The middle routing event records the feedback string in its inputs
+    # (not just the action), so the dashboard can show what was passed back.
+    middle = [
+        e for e in store.get_full_record(TASK_ID).xai_data.trajectory
+        if e.agent_id == "orchestrator" and e.action == "routing_decision"
+    ][1]
+    assert middle.action_inputs["feedback_to_specialist"] == "focus on ECG findings"
+
+
+def test_orchestrator_max_iterations_guard_forces_synthesis(store, loggers):
+    """
+    LLM keeps voting 'call_specialist_a' forever → after max_iterations the
+    orchestrator forces the handoff to the synthesizer rather than looping.
+    """
+    call_log: List[Dict[str, Any]] = []
+    spec_a = _FakeSpecialist(
+        "specialist_a", {"top_conditions": []},
+        loggers["message_logger"], call_log,
+    )
+    spec_b = _FakeSpecialist(
+        "specialist_b", {}, loggers["message_logger"], call_log,
+    )
+    synth = _FakeSynthesizer(
+        {"final_diagnosis": "Inconclusive", "confidence": 0.3,
+         "differential": [], "rationale": "Forced after max iterations."},
+        call_log,
+    )
+
+    # Only one decision payload — the helper replays it indefinitely.
+    llm = _routing_llm(
+        _ORCHESTRATOR_PLAN,
+        {"next_action": "call_specialist_a",
+         "reason": "still want more from A",
+         "feedback_to_specialist": ""},
+    )
+
+    max_iters = 3
+    agent = Orchestrator(
+        agent_id="orchestrator",
+        specialist_a=spec_a, specialist_b=spec_b, synthesizer=synth,
+        llm=llm, max_iterations=max_iters,
+        **loggers,
+    )
+    agent.run({"patient_case": CASE_TEXT, "options": {}})
+
+    # Specialist A is called exactly `max_iters` times; B is never called;
+    # synthesizer is called once at the forced handoff.
+    a_calls = [c for c in call_log if c["agent_id"] == "specialist_a"]
+    b_calls = [c for c in call_log if c["agent_id"] == "specialist_b"]
+    synth_calls = [c for c in call_log if c["agent_id"] == "synthesizer"]
+    assert len(a_calls) == max_iters
+    assert len(b_calls) == 0
+    assert len(synth_calls) == 1
+
+    # The trajectory contains exactly `max_iters + 1` routing_decision events
+    # (max_iters real ones inside the loop, one synthetic "forced" entry on
+    # exit) and the final handoff is annotated as forced.
+    actions = _orchestrator_actions(store)
+    assert actions[0] == "decompose_case"
+    assert actions[-1] == "handoff_to_synthesizer"
+    assert actions.count("routing_decision") == max_iters + 1
+    assert actions.count("route_to_specialist_a") == max_iters
+
+    # The last routing_decision before handoff has the forced-synthesis outcome.
+    routing_events = [
+        e for e in store.get_full_record(TASK_ID).xai_data.trajectory
+        if e.agent_id == "orchestrator" and e.action == "routing_decision"
+    ]
+    forced = routing_events[-1]
+    assert forced.action_inputs.get("forced") is True
+    assert "max_iterations" in forced.outcome.lower()
+
+    # The handoff event's outcome is suffixed with "(forced)" so a dashboard
+    # consumer can flag the run as truncated.
+    handoff = [
+        e for e in store.get_full_record(TASK_ID).xai_data.trajectory
+        if e.agent_id == "orchestrator" and e.action == "handoff_to_synthesizer"
+    ][0]
+    assert "(forced)" in handoff.outcome
 
 
 # ---------------------------------------------------------------------------
@@ -486,7 +804,7 @@ class TestMemoryWriteTraceability:
         ]
         agent = SpecialistB(
             agent_id="specialist_b",
-            pubmed_search_fn=lambda case, k: fake_docs,
+            textbook_search_fn=lambda case, k: fake_docs,
             guideline_lookup_fn=lambda c: {"match": "MI"},
             orchestrator_id="orchestrator",
             llm=_fake_llm(["Acute MI"]),
@@ -597,7 +915,7 @@ class TestMemoryWriteTraceability:
         )
         agent_b = SpecialistB(
             agent_id="specialist_b",
-            pubmed_search_fn=lambda case, k: [
+            textbook_search_fn=lambda case, k: [
                 {"doc_id": "d1", "text": "ev", "score": 0.5, "source_file": "x.txt"},
             ],
             guideline_lookup_fn=lambda c: {"match": "MI"},
@@ -855,3 +1173,269 @@ class TestSynthesizerOptionLevelReasoning:
         assert "do not recommend" in prompt_low or "not listed" in prompt_low
         assert "older guideline" in prompt_low or "defer to the listed" in prompt_low
         assert "verdict" in prompt_low
+
+
+# ---------------------------------------------------------------------------
+# LLM-driven tool selection (Pillar 3 case-by-case variation)
+# ---------------------------------------------------------------------------
+
+class TestLLMDrivenToolGating:
+    """
+    The specialists no longer call their tools in a fixed order with fixed
+    inputs. Each tool call is gated by an LLM decision so Pillar 3 (Tool
+    Provenance) varies by case.
+
+    These tests assert the negative case: when the LLM returns ``run: false``
+    for a tool, the tool callable is never invoked and no ToolUseEvent is
+    persisted for it. The tools are wrapped with ``traced_tool`` against a
+    real ``ToolProvenanceLogger`` so the absence of a ToolUseEvent is checked
+    end-to-end against the store, not just the mock call count.
+    """
+
+    @staticmethod
+    def _wrap(tool_logger, called_by: str, tool_name: str, mock):
+        from agentxai.xai.tool_provenance import traced_tool
+        return traced_tool(tool_logger, called_by=called_by, tool_name=tool_name)(mock)
+
+    @staticmethod
+    def _tool_names(store: TrajectoryStore) -> List[str]:
+        return [tc.tool_name for tc in store.get_full_record(TASK_ID).xai_data.tool_calls]
+
+    @staticmethod
+    def _action_event(store: TrajectoryStore, agent_id: str, action: str):
+        for e in store.get_full_record(TASK_ID).xai_data.trajectory:
+            if e.agent_id == agent_id and e.action == action:
+                return e
+        return None
+
+    # ------------------------------------------------------------------
+    # Specialist A
+    # ------------------------------------------------------------------
+
+    def test_specialist_a_skips_severity_when_llm_says_no(self, store, loggers):
+        """severity_scorer is never called and never logged when the LLM gates it off."""
+        from agentxai.xai.tool_provenance import ToolProvenanceLogger
+
+        tool_logger = ToolProvenanceLogger(store, TASK_ID)
+        sym_mock = MagicMock(return_value={"related_conditions": [("MI", 0.5)]})
+        sev_mock = MagicMock(return_value=0.99)
+        sym_fn = self._wrap(tool_logger, "specialist_a", "symptom_lookup", sym_mock)
+        sev_fn = self._wrap(tool_logger, "specialist_a", "severity_scorer", sev_mock)
+
+        # LLM responses, in invocation order:
+        #   1. generate_plan          → all four actions
+        #   2. extract_symptoms       → one symptom phrase
+        #   3. _select_lookup_subset  → echo the symptom (gate stays open)
+        #   4. _decide_score_severity → run: false, with a reason
+        llm = _fake_llm_seq(
+            ["extract_symptoms", "lookup_conditions", "score_severity", "summarize_findings"],
+            ["chest pain"],
+            ["chest pain"],
+            {"run": False, "reason": "non-acute presentation; severity ladder not informative"},
+        )
+
+        agent = SpecialistA(
+            agent_id="specialist_a",
+            symptom_lookup_fn=sym_fn,
+            severity_scorer_fn=sev_fn,
+            orchestrator_id="orchestrator",
+            llm=llm,
+            **loggers,
+        )
+        out = agent.run({"patient_case": CASE_TEXT})
+
+        # The tool callable was never invoked; severity stays at 0.0.
+        assert sev_mock.call_count == 0
+        assert out["severity_score"] == 0.0
+
+        # No ToolUseEvent persisted for severity_scorer. symptom_lookup ran
+        # once (the lookup gate stayed open) so the store isn't empty —
+        # we're verifying *selective* skipping, not blanket skipping.
+        names = self._tool_names(store)
+        assert "severity_scorer" not in names
+        assert names.count("symptom_lookup") == 1
+
+        # The trajectory event for score_severity still exists (the action
+        # was decided, just not executed) and its outcome carries the LLM's
+        # reasoning so the dashboard surfaces *why* the tool was skipped.
+        evt = self._action_event(store, "specialist_a", "score_severity")
+        assert evt is not None
+        outcome_low = evt.outcome.lower()
+        assert "skipped" in outcome_low
+        assert "non-acute" in outcome_low
+
+    def test_specialist_a_runs_severity_when_llm_says_yes(self, store, loggers):
+        """Counterpart: ``run: true`` → severity_scorer fires and is logged."""
+        from agentxai.xai.tool_provenance import ToolProvenanceLogger
+
+        tool_logger = ToolProvenanceLogger(store, TASK_ID)
+        sev_mock = MagicMock(return_value=0.42)
+        sym_fn = self._wrap(
+            tool_logger, "specialist_a", "symptom_lookup",
+            MagicMock(return_value={"related_conditions": []}),
+        )
+        sev_fn = self._wrap(tool_logger, "specialist_a", "severity_scorer", sev_mock)
+
+        llm = _fake_llm_seq(
+            ["extract_symptoms", "lookup_conditions", "score_severity", "summarize_findings"],
+            ["chest pain"],
+            ["chest pain"],
+            {"run": True, "reason": "acute red-flag features present"},
+        )
+
+        agent = SpecialistA(
+            agent_id="specialist_a",
+            symptom_lookup_fn=sym_fn,
+            severity_scorer_fn=sev_fn,
+            orchestrator_id="orchestrator",
+            llm=llm,
+            **loggers,
+        )
+        out = agent.run({"patient_case": CASE_TEXT})
+
+        assert sev_mock.call_count == 1
+        assert out["severity_score"] == pytest.approx(0.42)
+        assert "severity_scorer" in self._tool_names(store)
+
+    # ------------------------------------------------------------------
+    # Specialist B
+    # ------------------------------------------------------------------
+
+    def test_specialist_b_skips_textbook_when_llm_says_no(self, store, loggers):
+        """textbook_search is never called and never logged when gated off."""
+        from agentxai.xai.tool_provenance import ToolProvenanceLogger
+
+        tool_logger = ToolProvenanceLogger(store, TASK_ID)
+        tb_mock = MagicMock(return_value=[
+            {"doc_id": "d1", "text": "evidence", "score": 0.9, "source_file": "x.txt"},
+        ])
+        gl_mock = MagicMock(return_value={"match": "MI"})
+        tb_fn = self._wrap(tool_logger, "specialist_b", "textbook_search", tb_mock)
+        gl_fn = self._wrap(tool_logger, "specialist_b", "guideline_lookup", gl_mock)
+
+        # LLM responses:
+        #   1. generate_plan
+        #   2. _extract_candidates
+        #   3. _decide_evidence_tools — textbook off, guideline on
+        llm = _fake_llm_seq(
+            ["extract_candidate_conditions", "textbook_search",
+             "guideline_lookup", "summarize_findings"],
+            ["Acute MI"],
+            {
+                "textbook_search":  {"run": False, "reason": "case is rich in structured data; "
+                                                              "free-text retrieval would add noise",
+                                     "query": ""},
+                "guideline_lookup": {"run": True,  "reason": "candidate list is concrete",
+                                     "query": ""},
+            },
+        )
+
+        agent = SpecialistB(
+            agent_id="specialist_b",
+            textbook_search_fn=tb_fn,
+            guideline_lookup_fn=gl_fn,
+            orchestrator_id="orchestrator",
+            llm=llm,
+            **loggers,
+        )
+        out = agent.run({"patient_case": CASE_TEXT})
+
+        assert tb_mock.call_count == 0
+        assert gl_mock.call_count == 1            # one candidate looped
+        assert out["retrieved_docs"] == []
+        assert out["top_evidence"] == []
+        assert out["retrieval_confidence"] == 0.0
+
+        names = self._tool_names(store)
+        assert "textbook_search" not in names
+        assert names.count("guideline_lookup") == 1
+
+        evt = self._action_event(store, "specialist_b", "textbook_search")
+        assert evt is not None
+        outcome_low = evt.outcome.lower()
+        assert "skipped" in outcome_low
+        assert "noise" in outcome_low
+
+    def test_specialist_b_skips_guideline_when_llm_says_no(self, store, loggers):
+        """guideline_lookup is never called and never logged when gated off."""
+        from agentxai.xai.tool_provenance import ToolProvenanceLogger
+
+        tool_logger = ToolProvenanceLogger(store, TASK_ID)
+        tb_mock = MagicMock(return_value=[
+            {"doc_id": "d1", "text": "evidence", "score": 0.9, "source_file": "x.txt"},
+        ])
+        gl_mock = MagicMock(return_value={"match": "MI"})
+        tb_fn = self._wrap(tool_logger, "specialist_b", "textbook_search", tb_mock)
+        gl_fn = self._wrap(tool_logger, "specialist_b", "guideline_lookup", gl_mock)
+
+        llm = _fake_llm_seq(
+            ["extract_candidate_conditions", "textbook_search",
+             "guideline_lookup", "summarize_findings"],
+            ["Acute MI"],
+            {
+                "textbook_search":  {"run": True,  "reason": "free-text helpful here",
+                                     "query": ""},
+                "guideline_lookup": {"run": False, "reason": "no actionable guideline for "
+                                                              "this presentation",
+                                     "query": ""},
+            },
+        )
+
+        agent = SpecialistB(
+            agent_id="specialist_b",
+            textbook_search_fn=tb_fn,
+            guideline_lookup_fn=gl_fn,
+            orchestrator_id="orchestrator",
+            llm=llm,
+            **loggers,
+        )
+        out = agent.run({"patient_case": CASE_TEXT})
+
+        assert tb_mock.call_count == 1
+        assert gl_mock.call_count == 0
+        assert out["guideline_matches"] == []
+
+        names = self._tool_names(store)
+        assert "guideline_lookup" not in names
+        assert names.count("textbook_search") == 1
+
+        evt = self._action_event(store, "specialist_b", "guideline_lookup")
+        assert evt is not None
+        outcome_low = evt.outcome.lower()
+        assert "skipped" in outcome_low
+        assert "no actionable guideline" in outcome_low
+
+    def test_specialist_b_skips_both_when_llm_says_no(self, store, loggers):
+        """Neither retrieval tool is called when the LLM gates both off."""
+        from agentxai.xai.tool_provenance import ToolProvenanceLogger
+
+        tool_logger = ToolProvenanceLogger(store, TASK_ID)
+        tb_mock = MagicMock(return_value=[])
+        gl_mock = MagicMock(return_value={"match": None})
+        tb_fn = self._wrap(tool_logger, "specialist_b", "textbook_search", tb_mock)
+        gl_fn = self._wrap(tool_logger, "specialist_b", "guideline_lookup", gl_mock)
+
+        llm = _fake_llm_seq(
+            ["extract_candidate_conditions", "textbook_search",
+             "guideline_lookup", "summarize_findings"],
+            ["Acute MI"],
+            {
+                "textbook_search":  {"run": False, "reason": "skip a",  "query": ""},
+                "guideline_lookup": {"run": False, "reason": "skip b",  "query": ""},
+            },
+        )
+
+        agent = SpecialistB(
+            agent_id="specialist_b",
+            textbook_search_fn=tb_fn,
+            guideline_lookup_fn=gl_fn,
+            orchestrator_id="orchestrator",
+            llm=llm,
+            **loggers,
+        )
+        agent.run({"patient_case": CASE_TEXT})
+
+        assert tb_mock.call_count == 0
+        assert gl_mock.call_count == 0
+        # No ToolUseEvent persisted at all when both gates close.
+        assert self._tool_names(store) == []

@@ -233,7 +233,7 @@ class AccountabilityReport:
     agent_responsibility_scores: Dict[str, float] = field(default_factory=dict)
     root_cause_event_id: str = ""
     # Short human-readable rationale for *why* `root_cause_event_id` was
-    # selected (e.g., "pubmed_search from specialist_b: high-impact tool
+    # selected (e.g., "textbook_search from specialist_b: high-impact tool
     # (0.85), acted-upon message"). Empty string means the field was not
     # populated (e.g., older records produced before the selector logged it).
     root_cause_reason: str = ""

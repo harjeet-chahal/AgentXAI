@@ -386,9 +386,8 @@ _PILLAR_EXPLAINERS: Dict[str, str] = {
     ),
     "tools": (
         "This tab explains which tools were called and which one affected "
-        "the answer most. <code>pubmed_search</code> is a "
-        "<i>local textbook FAISS search</i>, not the real PubMed API — "
-        "the historical name is preserved on stored records."
+        "the answer most. <code>textbook_search</code> is a local FAISS "
+        "search over 18 medical textbooks."
     ),
     "memory": (
         "This tab shows what each agent wrote to memory and (when "
@@ -516,21 +515,14 @@ def _summarize_plans(plans: List[Dict[str, Any]]) -> Summary:
     return _prepend_explainer("plans", headline), bullets
 
 
-# Tools whose internal `tool_name` is preserved for backward compatibility
-# but whose actual implementation is something different from what the name
-# suggests. The dashboard surfaces the truth in user-facing strings while
-# leaving stored records (`tool_use_events.tool_name`) untouched.
-#
-# `pubmed_search` is currently a local FAISS retrieval over 18 medical
-# textbooks — see `agentxai/tools/pubmed_search.py` for why the name is
-# kept and how to swap in real PubMed.
-_TOOL_DISPLAY_OVERRIDES: Dict[str, str] = {
-    "pubmed_search": "pubmed_search (local textbook FAISS)",
-}
+# Optional overrides for user-facing tool labels. Empty by default —
+# tool_names are kept honest at the source. Add an entry here if a stored
+# `tool_use_events.tool_name` should be displayed under a friendlier label.
+_TOOL_DISPLAY_OVERRIDES: Dict[str, str] = {}
 
 
 def _tool_display_name(tool_name: Optional[str]) -> str:
-    """User-facing tool label, with overrides for misleading historical names."""
+    """User-facing tool label."""
     if not tool_name:
         return "?"
     return _TOOL_DISPLAY_OVERRIDES.get(tool_name, tool_name)
@@ -1242,9 +1234,8 @@ def _build_pipeline_story_bullets(record: Dict[str, Any]) -> List[str]:
             "condition lookup, and severity scoring."
         )
     if "specialist_b" in agents_seen:
-        # If the search actually ran, name the tool honestly.
         ran_search = any(
-            (t.get("tool_name") or "").lower() == "pubmed_search"
+            (t.get("tool_name") or "").lower() == "textbook_search"
             for t in tool_calls
         )
         if ran_search:

@@ -159,7 +159,7 @@ class TestImpactAlignment:
             task_id="T1",
             scores={"specialist_b": 0.85, "specialist_a": 0.15},
             tool_calls=[
-                ToolUseEvent(tool_name="pubmed_search",
+                ToolUseEvent(tool_name="textbook_search",
                              called_by="specialist_b",
                              downstream_impact_score=0.9),
                 ToolUseEvent(tool_name="symptom_lookup",
@@ -256,7 +256,7 @@ class TestRootCauseValidity:
             scores={"specialist_b": 0.9},
             trajectory=[TrajectoryEvent(
                 event_id="e1", agent_id="specialist_b",
-                event_type="tool_call", action="pubmed_search",
+                event_type="tool_call", action="textbook_search",
             )],
             root_cause_event_id="e1",
             causal_chain=["e1", "e_term"],
@@ -306,7 +306,7 @@ class TestRootCauseValidity:
             task_id="T1",
             trajectory=[TrajectoryEvent(
                 event_id="e1", agent_id="specialist_b",
-                event_type="tool_call", action="pubmed_search",
+                event_type="tool_call", action="textbook_search",
             )],
             root_cause_event_id="e1",
             causal_chain=["other_event", "e_term"],   # e1 missing
@@ -324,7 +324,7 @@ class TestRootCauseValidity:
         per_task = [
             root_cause_validity_for_task(_empty_record(
                 task_id="T1",
-                trajectory=[TrajectoryEvent(event_id="e1", action="pubmed_search",
+                trajectory=[TrajectoryEvent(event_id="e1", action="textbook_search",
                                              event_type="tool_call")],
                 root_cause_event_id="e1", causal_chain=["e1"],
             )),
@@ -465,10 +465,10 @@ def _seed_full_store(store: TrajectoryStore) -> List[str]:
     )
     store.save_task(s_good)
     e1 = TrajectoryEvent(event_id="g_e1", agent_id="specialist_b",
-                         event_type="tool_call", action="pubmed_search",
+                         event_type="tool_call", action="textbook_search",
                          timestamp=1.0)
     store.save_event("T-good", e1)
-    tool = ToolUseEvent(tool_call_id="g_t1", tool_name="pubmed_search",
+    tool = ToolUseEvent(tool_call_id="g_t1", tool_name="textbook_search",
                         called_by="specialist_b", timestamp=1.0,
                         downstream_impact_score=0.9)
     store.save_tool_call("T-good", tool)
@@ -487,7 +487,7 @@ def _seed_full_store(store: TrajectoryStore) -> List[str]:
         most_influential_message_id="g_m1",
         root_cause_event_id="g_e1",
         causal_chain=["g_e1"],
-        root_cause_reason="pubmed_search from specialist_b: high-impact tool (0.9)",
+        root_cause_reason="textbook_search from specialist_b: high-impact tool (0.9)",
     ))
     _seed_cf_runs(store, "T-good", {"specialist_b": 0.9, "specialist_a": 0.2})
     ids.append("T-good")

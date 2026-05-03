@@ -1191,7 +1191,7 @@ def _build_explanation_prompt(
         "tied_top_agents": tied,
         "root_cause_event": _resolve_event(xai, report.root_cause_event_id),
         # One-line rationale for *why* the selector picked that root-cause
-        # event (e.g., "pubmed_search from specialist_b: high-impact tool").
+        # event (e.g., "textbook_search from specialist_b: high-impact tool").
         # The LLM should weave this into the explanation rather than restating
         # the event_type in isolation.
         "root_cause_reason": report.root_cause_reason or "",

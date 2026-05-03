@@ -124,18 +124,30 @@ class CausalGraphModel(_Base):
     edges: List[CausalEdgeModel] = Field(default_factory=list)
 
 
+class MemoryUsageModel(_Base):
+    agent_id: str = ""
+    key: str = ""
+    read_by: List[str] = Field(default_factory=list)
+    used_in_final_answer: bool = False
+    influence_score: float = 0.0
+
+
 class AccountabilityReportModel(_Base):
     task_id: str
     final_outcome: str = ""
     outcome_correct: bool = False
     agent_responsibility_scores: Dict[str, float] = Field(default_factory=dict)
     root_cause_event_id: str = ""
+    root_cause_reason: str = ""
     causal_chain: List[str] = Field(default_factory=list)
     most_impactful_tool_call_id: str = ""
     critical_memory_diffs: List[str] = Field(default_factory=list)
     most_influential_message_id: str = ""
     plan_deviation_summary: str = ""
     one_line_explanation: str = ""
+    memory_usage: List[MemoryUsageModel] = Field(default_factory=list)
+    evidence_used_by_final_answer: List[str] = Field(default_factory=list)
+    most_supportive_evidence_ids: List[str] = Field(default_factory=list)
 
 
 class XAIDataModel(_Base):

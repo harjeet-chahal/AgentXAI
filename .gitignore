@@ -60,3 +60,6 @@ htmlcov/
 logs/
 
 med_qa/
+
+# Large local archives
+docs.zip

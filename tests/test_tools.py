@@ -4,7 +4,7 @@ Integration tests for the four Specialist-B tools in ``agentxai/tools/``.
 Each test exercises the real implementation end-to-end — no mocks. Indices
 that do not yet exist are built on first call by the tool itself (or by the
 ``build_knowledge_base`` helpers); the textbook FAISS build is slow (multiple
-minutes on CPU), so the ``pubmed_search`` test is marked ``@pytest.mark.slow``
+minutes on CPU), so the ``textbook_search`` test is marked ``@pytest.mark.slow``
 and only runs with ``--run-slow``.
 """
 
@@ -16,7 +16,7 @@ import pytest
 from langchain_core.tools import Tool
 
 from agentxai.tools.guideline_lookup import guideline_lookup, guideline_lookup_tool
-from agentxai.tools.pubmed_search import pubmed_search, pubmed_search_tool
+from agentxai.tools.textbook_search import textbook_search, textbook_search_tool
 from agentxai.tools.severity_scorer import (
     SEVERITY_WEIGHTS,
     severity_scorer,
@@ -105,15 +105,15 @@ def test_severity_scorer_weights_average_and_cooccurrence_bonus():
 
 
 # ---------------------------------------------------------------------------
-# pubmed_search  (slow: builds the textbook FAISS index on first run)
+# textbook_search  (slow: builds the textbook FAISS index on first run)
 # ---------------------------------------------------------------------------
 
 @pytest.mark.slow
-def test_pubmed_search_returns_topk_textbook_passages():
+def test_textbook_search_returns_topk_textbook_passages():
     """Real FAISS retrieval over the local textbook index. Asserts shape,
     score ordering, and that results are clearly relevant to the query."""
     query = "myocardial infarction chest pain ST elevation treatment"
-    results = pubmed_search(query, k=5)
+    results = textbook_search(query, k=5)
 
     assert isinstance(results, list)
     assert len(results) == 5
@@ -140,56 +140,38 @@ def test_pubmed_search_returns_topk_textbook_passages():
     )
 
     # k=0 and empty query are degenerate but well-defined.
-    assert pubmed_search("", k=5) == []
-    assert pubmed_search(query, k=0) == []
+    assert textbook_search("", k=5) == []
+    assert textbook_search(query, k=0) == []
 
     # Tool wrapper exposes the traced callable.
-    assert isinstance(pubmed_search_tool, Tool)
-    assert pubmed_search_tool.name == "pubmed_search"
-    assert pubmed_search_tool.func is pubmed_search
+    assert isinstance(textbook_search_tool, Tool)
+    assert textbook_search_tool.name == "textbook_search"
+    assert textbook_search_tool.func is textbook_search
 
 
 # ---------------------------------------------------------------------------
-# pubmed_search — name + description honesty
+# textbook_search — name + description sanity
 # ---------------------------------------------------------------------------
 
-class TestPubmedSearchNameHonesty:
-    """
-    The function name `pubmed_search` is preserved for backward compat
-    with stored records and call sites, but every user-facing surface
-    (Tool description, module docstring, dashboard alias) must clearly
-    say it's actually a local FAISS textbook search.
-    """
+class TestTextbookSearchNaming:
+    """The Tool description and module docstring should describe what the
+    tool actually does (local FAISS over medical textbooks)."""
 
-    def test_tool_description_states_local_faiss_not_pubmed(self):
-        desc = (pubmed_search_tool.description or "").lower()
-        # Must call out that it's local + FAISS-based.
+    def test_tool_description_states_local_faiss(self):
+        desc = (textbook_search_tool.description or "").lower()
         assert "local" in desc
         assert "faiss" in desc
-        # Must explicitly disclaim the misleading name.
-        assert ("not the pubmed" in desc) or ("not pubmed" in desc) or ("not real pubmed" in desc)
+        assert "textbook" in desc
 
-    def test_module_docstring_explains_naming(self):
-        from agentxai.tools import pubmed_search as mod
+    def test_module_docstring_describes_textbook_search(self):
+        from agentxai.tools import textbook_search as mod
         doc = (mod.__doc__ or "").lower()
-        assert "local" in doc and "faiss" in doc
-        assert "not real pubmed" in doc or "not the pubmed" in doc
+        assert "faiss" in doc and "textbook" in doc
 
-    def test_dashboard_display_alias_overrides_pubmed_search(self):
-        # Defer the import so the test suite doesn't hard-depend on
-        # streamlit at collection time when this test is skipped.
-        from agentxai.ui.dashboard import (
-            _TOOL_DISPLAY_OVERRIDES,
-            _tool_display_name,
-        )
-        assert "pubmed_search" in _TOOL_DISPLAY_OVERRIDES
-        label = _tool_display_name("pubmed_search")
-        assert label != "pubmed_search", "alias must change the display label"
-        low = label.lower()
-        assert "local" in low and "textbook" in low
-
-    def test_dashboard_display_alias_passes_unknown_names_through(self):
+    def test_dashboard_display_passes_known_names_through(self):
+        # Deferred import so streamlit isn't required at collection time.
         from agentxai.ui.dashboard import _tool_display_name
+        assert _tool_display_name("textbook_search") == "textbook_search"
         assert _tool_display_name("symptom_lookup") == "symptom_lookup"
         assert _tool_display_name("guideline_lookup") == "guideline_lookup"
         assert _tool_display_name("severity_scorer") == "severity_scorer"

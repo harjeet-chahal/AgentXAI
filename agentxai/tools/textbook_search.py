@@ -1,27 +1,13 @@
 """
-``pubmed_search`` tool — local textbook FAISS retrieval (NOT real PubMed).
+``textbook_search`` tool — local textbook FAISS retrieval.
 
-What this actually does
------------------------
-Despite the name, this tool DOES NOT query the PubMed/NCBI API. It runs a
-top-k semantic search over a local FAISS index built from 18 English
+What this does
+--------------
+Top-k semantic search over a local FAISS index built from 18 English
 medical textbooks (Harrison, Robbins, First Aid, etc.) — see
 ``agentxai.data.build_knowledge_base.build_textbook_index``. Embeddings
 are ``all-MiniLM-L6-v2``; similarity is cosine via L2-normalised inner
 product on a ``faiss.IndexFlatIP``.
-
-Why the name stays
-------------------
-The function name is preserved as a stable integration point: every agent
-call site, every stored ``tool_name="pubmed_search"`` row in
-``tool_use_events``, and every test that mocks the tool refer to this
-identifier. Renaming would break those references for no semantic gain.
-The dashboard surfaces this honestly via a display alias
-(`pubmed_search (local textbook FAISS)`); see
-`agentxai/ui/dashboard.py::_tool_display_name`. To swap in a real PubMed
-index later, replace the body of ``pubmed_search`` (or inject a
-different ``pubmed_search_fn`` into SpecialistB) without changing any
-caller.
 
 Returns
 -------
@@ -79,7 +65,7 @@ def _ensure_model() -> SentenceTransformer:
 # Default in-memory provenance logger (overrideable per agent run)
 # ---------------------------------------------------------------------------
 
-_DEFAULT_TASK_ID = "default-pubmed-search-task"
+_DEFAULT_TASK_ID = "default-textbook-search-task"
 _DEFAULT_STORE   = TrajectoryStore(db_url="sqlite:///:memory:")
 _DEFAULT_STORE.save_task(AgentXAIRecord(task_id=_DEFAULT_TASK_ID, source="tool"))
 _DEFAULT_LOGGER  = ToolProvenanceLogger(store=_DEFAULT_STORE, task_id=_DEFAULT_TASK_ID)
@@ -89,15 +75,11 @@ _DEFAULT_LOGGER  = ToolProvenanceLogger(store=_DEFAULT_STORE, task_id=_DEFAULT_T
 # Tool function
 # ---------------------------------------------------------------------------
 
-@traced_tool(_DEFAULT_LOGGER, called_by="default", tool_name="pubmed_search")
-def pubmed_search(query: str, k: int = 5) -> List[dict]:
+@traced_tool(_DEFAULT_LOGGER, called_by="default", tool_name="textbook_search")
+def textbook_search(query: str, k: int = 5) -> List[dict]:
     """
-    Retrieve the top-*k* most semantically similar passages to *query*.
-
-    NOTE: This searches a **local FAISS index over 18 medical textbooks**,
-    not the PubMed API. The name is preserved for backward compatibility
-    with stored tool-call records and call sites; see this module's
-    docstring for the full rationale and the swap-in path.
+    Retrieve the top-*k* most semantically similar passages to *query*
+    from a local FAISS index over 18 medical textbooks.
 
     Returns
     -------
@@ -135,14 +117,12 @@ def pubmed_search(query: str, k: int = 5) -> List[dict]:
 # LangChain Tool wrapper
 # ---------------------------------------------------------------------------
 
-pubmed_search_tool = Tool(
-    name="pubmed_search",
+textbook_search_tool = Tool(
+    name="textbook_search",
     description=(
-        "Top-k semantic search over a LOCAL medical-textbook FAISS index "
-        "(18 English textbooks, all-MiniLM-L6-v2 embeddings). Despite the "
-        "name, this is NOT the PubMed/NCBI API — the name is preserved as "
-        "a stable integration point for legacy call sites and stored "
-        "records. Returns: list of {doc_id, text, score, source_file}."
+        "Top-k semantic search over a local medical-textbook FAISS index "
+        "(18 English textbooks, all-MiniLM-L6-v2 embeddings). Returns: "
+        "list of {doc_id, text, score, source_file}."
     ),
-    func=pubmed_search,
+    func=textbook_search,
 )

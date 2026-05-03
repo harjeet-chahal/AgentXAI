@@ -27,6 +27,7 @@ import json
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Iterator, List, Optional
 
+from agentxai.agents._llm_utils import extract_text, parse_json_list
 from agentxai.data.schemas import TrajectoryEvent
 from agentxai.xai.memory_logger import MemoryLogger, current_event_id
 from agentxai.xai.message_logger import MessageLogger
@@ -104,6 +105,43 @@ class TracedAgent(ABC):
         plan = self.plan_tracker.register_plan(self.agent_id, list(intended_actions))
         self._plan_stack.append(plan.plan_id)
         return plan.plan_id
+
+    def generate_plan(
+        self,
+        case_context: str,
+        available_actions: List[str],
+    ) -> List[str]:
+        """
+        Ask the LLM to choose a subset (and ordering) of ``available_actions``
+        appropriate for ``case_context``. Returns the chosen plan as a list
+        of action names, filtered to the available set.
+
+        Falls back to the full ``available_actions`` list when:
+          - no LLM is wired,
+          - the LLM raises,
+          - the response is empty / not valid JSON,
+          - or no returned name is a valid action.
+        """
+        if self.llm is None or not available_actions:
+            return list(available_actions)
+
+        prompt = (
+            "Given this clinical case, choose which of these actions to "
+            "perform and in what order. Return ONLY a JSON array of action "
+            "names. Available actions: "
+            f"{list(available_actions)}. Case: {case_context}"
+        )
+        try:
+            response = self.llm.invoke(prompt)
+        except Exception:
+            return list(available_actions)
+
+        parsed = parse_json_list(extract_text(response))
+        allowed = set(available_actions)
+        plan = [a for a in parsed if a in allowed]
+        if not plan:
+            return list(available_actions)
+        return plan
 
     @contextlib.contextmanager
     def active_plan(self, intended_actions: List[str]) -> Iterator[str]:

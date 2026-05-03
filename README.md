@@ -2,7 +2,7 @@
 
 **Explainable multi-agent AI for medical triage** — a framework that explains every dimension of agentic behavior simultaneously, demonstrated on USMLE-style clinical reasoning.
 
-> **Thesis.** Existing XAI techniques (SHAP, Grad-CAM, LIME) explain individual model predictions. Modern AI systems are _agentic_: they plan, use tools, communicate, remember, and act across time. AgentXAI builds a framework that explains all of that behavior across **7 orthogonal pillars** — applied to a team of specialized agents that collaborates to diagnose a patient case from the MedQA corpus.
+> **Thesis.** Existing XAI techniques (SHAP, Grad-CAM, LIME) explain individual model predictions. Modern AI systems are _agentic_: they plan, use tools, communicate, remember, and act across time. AgentXAI builds a framework that explains all of that behavior across **7 orthogonal pillars** — applied to a team of specialized agents that genuinely behaves agentically: **plans are LLM-generated** per case (not a hardcoded sequence), the **Orchestrator dynamically routes** between Specialists turn-by-turn (and may re-call them with free-form feedback), each Specialist's **tool calls are LLM-selected** from its available toolset, and a **Critic** reviews the Synthesizer's draft and can trigger a self-revision pass before the answer is committed.
 
 ---
 
@@ -13,22 +13,28 @@
  │                        MedQA Patient Case                           │
  └──────────────────────────────┬──────────────────────────────────────┘
                                 │
-                    ┌───────────▼───────────┐
-                    │      Orchestrator      │  routes + coordinates
-                    └──┬──────────────────┬─┘
-                       │                  │
-           ┌───────────▼───┐       ┌──────▼───────────┐
-           │  Specialist A  │       │   Specialist B    │
-           │ symptom_lookup │       │  pubmed_search    │
-           │severity_scorer │       │ guideline_lookup  │
-           └───────┬───────┘       └──────┬────────────┘
-                   │   findings            │   findings
-                   └──────────┬────────────┘
-                    ┌─────────▼──────────┐
-                    │     Synthesizer     │  final diagnosis
-                    └─────────┬──────────┘
-                              │
-         ┌────────────────────▼──────────────────────┐
+                    ┌───────────▼────────────┐
+              ┌────►│      Orchestrator      │  LLM-decided routing,
+              │     │  (routing_decision ↺)  │  re-calls w/ feedback
+              │     └──┬──────────────────┬──┘
+              │        │ feedback         │ feedback
+              │   ┌────▼─────────┐   ┌────▼──────────────┐
+              │   │ Specialist A │   │   Specialist B    │
+              │   │ symptom_lookup│   │  textbook_search  │
+              │   │severity_scorer│   │ guideline_lookup  │
+              │   └──────┬───────┘   └──────┬────────────┘
+              │   findings│                 │findings
+              │          └────────┬─────────┘
+              │           ┌───────▼──────────┐
+              │           │   Synthesizer    │  draft answer +
+              │           └───────┬──────────┘  option-level rationale
+              │                   │ draft
+              │           ┌───────▼──────────┐
+              │  revise   │      Critic      │  self-critique:
+              └───────────┤  (needs_revision)│  missing differentials,
+                          └───────┬──────────┘  ignored evidence
+                                  │ committed answer
+         ┌────────────────────────▼──────────────────┐
          │             XAI Runtime Layer              │
          │  P1 Trajectory   P2 Plans   P3 Tools       │
          │  P4 Memory       P5 Comms   P6 Causality   │
@@ -42,6 +48,19 @@
     │ agentxai.db     │ │  :8000      │ │  dashboard    │
     └─────────────────┘ └─────────────┘ └───────────────┘
 ```
+
+---
+
+## Why this is genuinely agentic
+
+Four properties separate this pipeline from a hardcoded "decompose → A → B → synthesize" chain:
+
+1. **Plans are LLM-generated.** Each agent's `active_plan` (Pillar 2) is produced per case by `generate_plan` over the agent's available actions — not a checked-in list. Different cases yield different intended trajectories.
+2. **Routing is LLM-decided.** The Orchestrator's `routing_decision` loop asks the LLM, turn by turn, which Specialist to call next given the findings so far, or whether to hand off to the Synthesizer. Specialists may be re-called, skipped, or invoked in either order.
+3. **Tools are LLM-selected.** Each Specialist's tool calls (`symptom_lookup`, `severity_scorer`, `textbook_search`, `guideline_lookup`) are chosen by the model from the toolset bound to it; the pipeline does not script which tool fires when.
+4. **The system can self-revise.** The Critic reviews the Synthesizer's draft answer + rationale and emits a strict-JSON verdict. When `needs_revision` is true, the Pipeline re-enters the Orchestrator with the missing-considerations injected as feedback, producing a second pass before the answer is committed.
+
+Each of these decisions is logged through the trajectory + plan + tool-provenance pillars, so the XAI layer explains *why* the agents made the choices they made — not just what a fixed pipeline would have done anyway.
 
 ---
 
@@ -110,9 +129,13 @@ a heuristic infers it from rationale ↔ snippet word overlap.
 ```
 AgentXAI/
 ├── agentxai/
-│   ├── agents/                 # Orchestrator, SpecialistA, SpecialistB, Synthesizer
+│   ├── agents/                 # Orchestrator, SpecialistA, SpecialistB, Synthesizer, Critic
 │   │                           #   (TracedAgent provides traced_action so memory writes
 │   │                           #    link to a single trajectory event)
+│   │                           #   - critic.py — self-critique pass over the Synthesizer's
+│   │                           #     draft; emits {needs_revision, missing_considerations,
+│   │                           #     confidence_in_critique} so Pipeline can trigger a
+│   │                           #     feedback-driven re-route through the Orchestrator
 │   ├── api/                    # FastAPI backend (env-driven CORS + optional bearer-token auth)
 │   ├── data/
 │   │   ├── load_medqa.py       # MedQA loader + deterministic train/eval/review splits
@@ -124,9 +147,8 @@ AgentXAI/
 │   ├── store/                  # SQLAlchemy ORM (idempotent ALTER TABLE migrations);
 │   │                           #   manual_reviews_v2 with FK→tasks.task_id
 │   ├── tools/                  # LangChain tools — symptom_lookup, severity_scorer,
-│   │                           #   guideline_lookup, pubmed_search ⚠ (local FAISS over
-│   │                           #   medical textbooks, NOT the real PubMed API — see
-│   │                           #   docs/ARCHITECTURE.md "Tool naming")
+│   │                           #   guideline_lookup, textbook_search (local FAISS over
+│   │                           #   18 medical textbooks)
 │   ├── xai/
 │   │   ├── trajectory_logger.py     # Pillar 1 (with structured _to_jsonable fallback)
 │   │   ├── plan_tracker.py          # Pillar 2
@@ -369,7 +391,7 @@ python eval/aggregate_manual_reviews.py \
 | 0 | Project scaffolding | ✅ Complete |
 | 1 | Data loading, schema definitions, FAISS index | ✅ Complete |
 | 2 | Agents (Orchestrator, Specialists, Synthesizer) | ✅ Complete |
-| 3 | Tools (symptom_lookup, severity_scorer, pubmed_search ⚠ local FAISS, guideline_lookup) | ✅ Complete |
+| 3 | Tools (symptom_lookup, severity_scorer, textbook_search, guideline_lookup) | ✅ Complete |
 | 4 | XAI runtime layer (all 7 pillars) | ✅ Complete |
 | 5 | Counterfactual engine | ✅ Complete |
 | 6 | SQLite store + FastAPI backend (env-driven CORS + optional bearer-token auth) | ✅ Complete |

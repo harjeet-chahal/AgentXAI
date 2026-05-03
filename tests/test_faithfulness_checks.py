@@ -64,7 +64,7 @@ class TestImpactfulToolOnChain:
                  "event_type": "tool_call", "timestamp": 1.0},
             ],
             tool_calls=[
-                {"tool_call_id": "tc1", "tool_name": "pubmed_search",
+                {"tool_call_id": "tc1", "tool_name": "textbook_search",
                  "called_by": "specialist_b", "timestamp": 1.05,
                  "downstream_impact_score": 0.9},
             ],
@@ -75,7 +75,7 @@ class TestImpactfulToolOnChain:
         )
         r = check_impactful_tool_on_chain(rec)
         assert r["status"] == "pass"
-        assert "pubmed_search" in r["explanation"]
+        assert "textbook_search" in r["explanation"]
 
     def test_warn_when_tool_event_not_on_chain(self):
         rec = _record(
@@ -87,7 +87,7 @@ class TestImpactfulToolOnChain:
                  "event_type": "agent_action", "timestamp": 2.0},
             ],
             tool_calls=[
-                {"tool_call_id": "tc1", "tool_name": "pubmed_search",
+                {"tool_call_id": "tc1", "tool_name": "textbook_search",
                  "called_by": "specialist_b", "timestamp": 1.0,
                  "downstream_impact_score": 0.9},
             ],
@@ -229,7 +229,7 @@ class TestTopAgentHasSignal:
 class TestRootCauseNotAggregator:
     def test_pass_when_root_is_real_action(self):
         rec = _record(
-            trajectory=[{"event_id": "e1", "action": "pubmed_search",
+            trajectory=[{"event_id": "e1", "action": "textbook_search",
                          "event_type": "tool_call"}],
             report={"root_cause_event_id": "e1", "root_cause_reason": ""},
         )
@@ -463,14 +463,14 @@ class TestHeadlineIntegration:
         rec = _record(
             trajectory=[
                 {"event_id": "e_search", "agent_id": "specialist_b",
-                 "event_type": "tool_call", "action": "pubmed_search",
+                 "event_type": "tool_call", "action": "textbook_search",
                  "timestamp": 1.0},
                 {"event_id": "e_term", "agent_id": "synthesizer",
                  "event_type": "final_diagnosis",
                  "action": "synthesize_diagnosis", "timestamp": 3.0},
             ],
             tool_calls=[
-                {"tool_call_id": "tc1", "tool_name": "pubmed_search",
+                {"tool_call_id": "tc1", "tool_name": "textbook_search",
                  "called_by": "specialist_b", "timestamp": 1.0,
                  "downstream_impact_score": 0.85},
             ],
@@ -489,7 +489,7 @@ class TestHeadlineIntegration:
                 "most_influential_message_id": "m1",
                 "root_cause_event_id": "e_search",
                 "root_cause_reason":
-                    "pubmed_search from specialist_b: high-impact tool (0.85)",
+                    "textbook_search from specialist_b: high-impact tool (0.85)",
                 "causal_chain": ["e_search", "e_term"],
                 "memory_usage": [
                     {"agent_id": "specialist_b", "key": "top_evidence",
