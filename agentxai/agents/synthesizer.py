@@ -45,7 +45,11 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, List
 
-from agentxai.agents._llm_utils import extract_text, parse_json_object
+from agentxai.agents._llm_utils import (
+    extract_letter_from_text,
+    extract_text,
+    parse_json_object,
+)
 from agentxai.agents.base import TracedAgent, make_default_llm
 
 
@@ -288,7 +292,14 @@ def _normalise_result(parsed: Any, raw: str) -> Dict[str, Any]:
     `final_diagnosis` and vice versa so callers can read either key.
     """
     if not isinstance(parsed, dict):
-        return _empty_result(raw.strip())
+        # LLM emitted prose without JSON braces. Salvage at least the
+        # answer letter from the raw text so the task isn't recorded as
+        # an unparseable prediction (defaults to MedQA-US A-E set).
+        empty = _empty_result(raw.strip())
+        empty["predicted_letter"] = extract_letter_from_text(
+            empty["rationale"], set("ABCDE")
+        )
+        return empty
 
     final = str(parsed.get("final_diagnosis", "") or "").strip()
     predicted_text = str(parsed.get("predicted_text", "") or "").strip()
@@ -329,6 +340,23 @@ def _normalise_result(parsed: Any, raw: str) -> Dict[str, Any]:
                 if not final:
                     final = predicted_text
                 break
+
+    # Last-ditch chain-of-thought fallback: when the LLM emits the answer
+    # only in the rationale prose ("$\boxed{B}$", "Option B is the most
+    # appropriate") instead of populating predicted_letter, scrape it.
+    # Without this, the whole task gets recorded as an unparseable
+    # prediction even though the LLM clearly committed to an answer.
+    if not predicted_letter and rationale:
+        valid_letters = {e["letter"] for e in option_analysis} or set("ABCDE")
+        predicted_letter = extract_letter_from_text(rationale, valid_letters)
+        if predicted_letter:
+            for entry in option_analysis:
+                if entry["letter"] == predicted_letter:
+                    if not predicted_text and entry["text"]:
+                        predicted_text = entry["text"]
+                    if not final:
+                        final = predicted_text
+                    break
 
     return {
         "final_diagnosis":         final,

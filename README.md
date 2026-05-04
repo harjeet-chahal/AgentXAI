@@ -176,15 +176,23 @@ AgentXAI/
 │   ├── evaluate_existing.py         # Same metrics over stored snapshots (no LLM re-runs)
 │   ├── evaluate_accountability.py   # 4-metric attribution-quality monitor over stored records
 │   └── aggregate_manual_reviews.py  # Mean ± std summary over both manual_reviews tables
+├── tests/                   # 614 pytest tests (unit + integration; 6 slow tests gated by --run-slow)
 ├── docs/
 │   ├── ARCHITECTURE.md      # Pillar-to-file mapping, scoring weights, tool naming, mr v2 migration
-│   └── DATASET.md           # MedQA schema, AgentXAIRecord example
+│   ├── DATASET.md           # MedQA schema, AgentXAIRecord example
+│   └── IMPROVEMENT_PLAN.md  # Forward-looking 7-phase rewrite addressing current eval failures
 ├── med_qa/                  # MedQA corpus (JSONL + textbooks)
 ├── run_pipeline.py          # End-to-end pipeline runner
+├── inspect_last_task.py     # Diagnostic — dump full XAI state of the most recent task
+├── regen_explanation.py     # Re-run only the one-line explanation for stored task(s)
+├── rescore_last_run.py      # Recompute accuracy from stored predictions vs. corrected truth
+├── tasks.py                 # Quick DB inspector — list/dump tasks from agentxai.db
 ├── Makefile                 # install / test / index / run-one / run-eval / dashboard / api
 ├── pyproject.toml
 └── requirements.txt
 ```
+
+**Helpers inside `agentxai/`:** `_llm_factory.py` (Gemini key-rotation factory — supports `GOOGLE_API_KEYS` comma-separated for multi-key rotation), `agents/_llm_utils.py` (shared agent-side LLM call helpers). The `agentxai/eval/` package directory currently holds only a 2-line stub; the canonical eval runner is the top-level `eval/evaluate.py`.
 
 ---
 
@@ -201,8 +209,11 @@ source venv/bin/activate          # Windows: venv\Scripts\activate
 
 pip install -r requirements.txt   # or: make install
 
-cp .env.example .env
-# Edit .env — set GOOGLE_API_KEY (required) and OPENAI_API_KEY (optional)
+# Create a .env file at the repo root with your Gemini key:
+#   GOOGLE_API_KEY=your_key_here
+# OR for key rotation across rate limits, comma-separated:
+#   GOOGLE_API_KEYS=key1,key2,key3
+# Optional: OPENAI_API_KEY=...   (only used if you swap the LLM factory)
 ```
 
 Build the FAISS textbook index (one-time, ~5 min on CPU):
@@ -368,19 +379,47 @@ python eval/aggregate_manual_reviews.py \
 
 ## Results
 
-> **Placeholder — fill in after running the evaluation suite.**
+> **Headline run: 2026-05-04, 100 records.** Numbers below come from
+> `eval/results_20260504T103210Z.{json,md}` — a fresh 100-record
+> evaluation over the MedQA-US dev split, with 10 stability rephrase
+> samples. The 2026-04-27 column is the prior snapshot
+> (`eval/results_existing_20260427_191323.{json,md}`) kept here for
+> direct comparison.
 
-| Metric | Value |
-|--------|-------|
-| Task accuracy (1 500 records) | — |
-| XAI sufficiency | — |
-| XAI necessity | — |
-| Stability (mean Spearman ρ) | — |
-| Faithfulness | — |
-| Manual review — plausibility (mean ± std) | — |
-| Manual review — completeness (mean ± std) | — |
-| Manual review — specificity (mean ± std) | — |
-| Manual review — causal coherence (mean ± std) | — |
+| Metric | **May 4, 2026** | Apr 27, 2026 (baseline) | Δ |
+|--------|----------------|-------------------------|---|
+| Task accuracy (100 records) | **74.0%** | 48.0% | **+26 pts** |
+| XAI sufficiency | **93.0%** | 84.9% | +8.1 pts |
+| XAI necessity | **19.0%** | 53.5% | **−34.5 pts** |
+| Stability (mean Spearman ρ) | **0.71 ± 0.53** (9/10 valid) | 0.20 ± 0.98 (5/10 valid) | **+0.51** |
+| Top-bin (0.9–1.0) calibration | 95% conf → 76.2% correct (n = 80) | 95% conf → 51.7% correct (n = 58) | top-bin tightened, model still overconfident |
+
+**What the numbers say.** Accuracy almost doubled and the explainer got
+*more* reliable: sufficiency rose to 93%, and stability ρ went from
+near-noise (0.20 ± 0.98) to genuine signal (0.71 ± 0.53). The score
+that survives LLM rephrasing is the score we trust, and it lights up
+the same agent 93% of the time.
+
+The necessity drop (54% → 19%) is the interesting finding, not a
+regression. At 74% accuracy, no single agent dominates: zeroing the
+top-1 agent's memory rarely flips the answer because the team has
+multiple paths to the same conclusion (or — equivalently — the
+Synthesizer's prior carries the answer, which is the failure mode
+`docs/IMPROVEMENT_PLAN.md` Phase 5 targets directly).
+
+Faithfulness stays at 0 / 0 because the root-cause selector filters
+every candidate out in the high-accuracy regime — a calibration issue
+that's now traceable to the filter, not the metric.
+
+> **Original failure modes that drove the
+> `docs/IMPROVEMENT_PLAN.md` rewrite** (visible in the Apr-27 baseline):
+> irrelevant SpecialistA outputs, broken severity scoring, zero tool
+> counterfactual impact, generic retrieval, Synthesizer dominance,
+> overconfidence, and explanations that don't audit reasoning quality.
+> The May 4 run shows accuracy + sufficiency + stability moved in the
+> right direction; necessity + faithfulness reveal a *new* regime
+> (high-accuracy, team-driven) the planned rewrite still needs to
+> address.
 
 ---
 
@@ -399,7 +438,7 @@ python eval/aggregate_manual_reviews.py \
 | 8 | Evaluation suite (5 pipeline-rerun metrics + 5 snapshot metrics + 4 attribution metrics + manual-review aggregation) | ✅ Complete |
 | 9 | **Faithfulness pass** — composite responsibility scoring · root-cause selector · memory-usage attribution · event-linked memory diffs · option-level Synthesizer reasoning · `XAIScoringConfig` · dashboard faithfulness checks · `manual_reviews_v2` with FK · evidence attribution · confidence factors · question classifier | ✅ Complete |
 
-**Test suite**: 570 unit/integration tests passing (6 slow integration tests
+**Test suite**: 614 unit/integration tests passing (6 slow integration tests
 require `--run-slow` + `GOOGLE_API_KEY`). Run with `make test` or
 `pytest tests/`.
 

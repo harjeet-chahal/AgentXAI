@@ -92,3 +92,58 @@ def parse_json_object(text: str) -> Optional[Dict[str, Any]]:
             pass
 
     return None
+
+
+# Patterns for chain-of-thought answer extraction, in priority order.
+# Within each pattern the LAST match wins — LLMs typically state the
+# conclusion at the END of their reasoning ("Therefore the answer is B.")
+_LETTER_PATTERNS = [
+    # LaTeX-boxed answer: \boxed{B}, $\boxed{B}$, \boxed{ b }
+    re.compile(r"\\boxed\s*\{\s*([A-Za-z])\s*\}"),
+    # "the final answer is B", "correct answer is (B):"
+    re.compile(
+        r"(?:final|correct|right|best)\s+answer\s+is[:\s]*\(?([A-Za-z])\)?\b",
+        re.IGNORECASE,
+    ),
+    # bare "the answer is B" (must be after the more specific pattern above)
+    re.compile(r"\banswer\s+is[:\s]*\(?([A-Za-z])\)?\b", re.IGNORECASE),
+    # "answer: B", "Answer = B"
+    re.compile(r"\banswer\s*[:=]\s*\(?([A-Za-z])\)?\b", re.IGNORECASE),
+    # "Option B is the most appropriate" — verb constraint avoids false
+    # positives from per-option analysis sections.
+    re.compile(
+        r"\b(?:Option|Choice|Selection)\s+([A-Za-z])\b\s+(?:is|would|appears|"
+        r"seems|represents|provides|gives|remains|emerges|stands)",
+        re.IGNORECASE,
+    ),
+]
+
+
+def extract_letter_from_text(
+    text: str,
+    valid_letters: Optional[set] = None,
+) -> str:
+    """
+    Best-effort extract a single answer letter from free-form rationale text.
+
+    Used as a last-ditch fallback when the LLM emits its answer in
+    chain-of-thought form ("$\\boxed{B}$", "the final answer is B",
+    "Option B is the most appropriate") rather than populating a
+    structured JSON ``predicted_letter`` field.
+
+    ``valid_letters`` constrains which letters are acceptable (e.g.
+    ``{"A","B","C","D","E"}`` for MedQA-US). When omitted, accepts any
+    A-J.
+
+    Returns ``""`` if no high-confidence match is found.
+    """
+    if not text:
+        return ""
+    valid = {s.upper() for s in (valid_letters or set("ABCDEFGHIJ"))}
+    for pat in _LETTER_PATTERNS:
+        matches = pat.findall(text)
+        for letter in reversed(matches):
+            up = letter.upper()
+            if up in valid:
+                return up
+    return ""

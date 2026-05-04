@@ -744,12 +744,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     print(f"  Sufficiency      : {suf['sufficiency_score']:.1%}")
     print(f"  Necessity        : {nec['necessity_score']:.1%}")
     if mean_s is not None:
-        print(f"  Stability (ρ)   : {mean_s:.4f} ± {stab['stability_std_spearman']:.4f}")
+        print(f"  Stability (rho)  : {mean_s:.4f} +/- {stab['stability_std_spearman']:.4f}")
     else:
-        print("  Stability (ρ)   : N/A")
+        print("  Stability (rho)  : N/A")
     print(f"  Faithfulness     : {faith['faithfulness_score']:.1%}")
-    print(f"\n  JSON  → {json_path}")
-    print(f"  MD    → {md_path}")
+    print(f"\n  JSON  -> {json_path}")
+    print(f"  MD    -> {md_path}")
 
     return 0
 
