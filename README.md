@@ -366,39 +366,6 @@ python eval/aggregate_manual_reviews.py \
 
 ---
 
-## Results
-
-> **Placeholder — fill in after running the evaluation suite.**
-
-| Metric | Value |
-|--------|-------|
-| Task accuracy (1 500 records) | — |
-| XAI sufficiency | — |
-| XAI necessity | — |
-| Stability (mean Spearman ρ) | — |
-| Faithfulness | — |
-| Manual review — plausibility (mean ± std) | — |
-| Manual review — completeness (mean ± std) | — |
-| Manual review — specificity (mean ± std) | — |
-| Manual review — causal coherence (mean ± std) | — |
-
----
-
-## Development status
-
-| Phase | Description | Status |
-|-------|-------------|--------|
-| 0 | Project scaffolding | ✅ Complete |
-| 1 | Data loading, schema definitions, FAISS index | ✅ Complete |
-| 2 | Agents (Orchestrator, Specialists, Synthesizer) | ✅ Complete |
-| 3 | Tools (symptom_lookup, severity_scorer, textbook_search, guideline_lookup) | ✅ Complete |
-| 4 | XAI runtime layer (all 7 pillars) | ✅ Complete |
-| 5 | Counterfactual engine | ✅ Complete |
-| 6 | SQLite store + FastAPI backend (env-driven CORS + optional bearer-token auth) | ✅ Complete |
-| 7 | Streamlit dashboard (7 tabs + review page + per-case panels) | ✅ Complete |
-| 8 | Evaluation suite (5 pipeline-rerun metrics + 5 snapshot metrics + 4 attribution metrics + manual-review aggregation) | ✅ Complete |
-| 9 | **Faithfulness pass** — composite responsibility scoring · root-cause selector · memory-usage attribution · event-linked memory diffs · option-level Synthesizer reasoning · `XAIScoringConfig` · dashboard faithfulness checks · `manual_reviews_v2` with FK · evidence attribution · confidence factors · question classifier | ✅ Complete |
-
 **Test suite**: 570 unit/integration tests passing (6 slow integration tests
 require `--run-slow` + `GOOGLE_API_KEY`). Run with `make test` or
 `pytest tests/`.
